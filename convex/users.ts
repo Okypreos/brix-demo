@@ -185,20 +185,68 @@ export const deleteFromClerk = internalMutation({
 // -----------------------------------------------------------------------
 
 /**
+ * Returns the role + Convex `_id` of the user with the given Clerk ID,
+ * or `null` if the webhook hasn't mirrored them yet. The seed script
+ * polls this after creating a Clerk user so it knows when it's safe to
+ * call follow-up internal mutations (promote, seed quotes, etc).
+ *
+ * Exposed as a public query but reveals only "does this Clerk subject
+ * exist in our DB" — strictly less sensitive than what a holder of the
+ * Clerk secret key can already see. We do NOT return name/email here,
+ * to keep this strictly an existence-and-role probe.
+ */
+export const byClerkId = query({
+  args: { clerkId: v.string() },
+  returns: v.union(
+    v.object({ kind: v.literal("manager"), id: v.id("managers") }),
+    v.object({ kind: v.literal("technician"), id: v.id("technicians") }),
+    v.null(),
+  ),
+  handler: async (ctx, { clerkId }) => {
+    const manager = await ctx.db
+      .query("managers")
+      .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
+      .unique();
+    if (manager) return { kind: "manager" as const, id: manager._id };
+    const technician = await ctx.db
+      .query("technicians")
+      .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
+      .unique();
+    if (technician) {
+      return { kind: "technician" as const, id: technician._id };
+    }
+    return null;
+  },
+});
+
+/**
  * Promotes a technician row into the managers table. Used by the seed
  * script to designate test managers, and could be called from a future
  * admin UI. Internal so a malicious client cannot self-elevate.
+ *
+ * Idempotent: if a manager already exists for this clerkId we return
+ * its id; if a technician exists, we move it; if neither, we throw.
  */
 export const promoteToManager = internalMutation({
   args: { clerkId: v.string() },
   returns: v.id("managers"),
   handler: async (ctx, { clerkId }): Promise<Id<"managers">> => {
+    // Already promoted? No-op.
+    const existingManager: Doc<"managers"> | null = await ctx.db
+      .query("managers")
+      .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
+      .unique();
+    if (existingManager) return existingManager._id;
+
     const tech: Doc<"technicians"> | null = await ctx.db
       .query("technicians")
       .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
       .unique();
     if (!tech) {
-      throw new ConvexError("No technician found for that Clerk ID");
+      throw new ConvexError(
+        `No manager or technician found for Clerk ID ${clerkId}. ` +
+          `Has the user.created webhook fired yet?`,
+      );
     }
     const managerId = await ctx.db.insert("managers", {
       tokenIdentifier: tech.tokenIdentifier,

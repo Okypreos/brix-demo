@@ -4,25 +4,25 @@ overview: Build an end-to-end manager↔technician job scheduling app on Next.js
 todos:
   - id: scaffold
     content: Install deps (convex, @clerk/nextjs, convex/react-clerk, react-big-calendar, date-fns, sonner, react-hook-form, @hookform/resolvers, zod) and run npx convex dev to scaffold convex/ folder + .env.local
-    status: pending
+    status: completed
   - id: schema
     content: Write convex/schema.ts with users, quotes, jobs, notifications tables and indexes including by_technician_start for fast overlap
-    status: pending
+    status: completed
   - id: auth
     content: "Wire Clerk: create proxy.ts, ConvexClientProvider with ConvexProviderWithClerk, convex/auth.config.ts, convex/lib/auth.ts (requireRole), and Clerk JWT template"
-    status: pending
+    status: completed
   - id: users
     content: Implement convex/users.ts (ensureUser upsert, getMe, listTechnicians) called on first authenticated load
-    status: pending
+    status: completed
   - id: quotes
     content: Implement convex/quotes.ts CRUD (create, list, listUnscheduled, get) with manager role gate; build manager Quotes page + New Quote sheet form
     status: pending
   - id: jobs-assign
     content: Implement convex/jobs.ts:assign mutation with OCC overlap check using by_technician_start index, atomically inserts job + patches quote + writes notification
-    status: pending
+    status: completed
   - id: jobs-complete
     content: Implement convex/jobs.ts:complete and convex/jobs.ts:reschedule mutations with same overlap guard, plus listForTechnician / listForManager queries
-    status: pending
+    status: completed
   - id: notifications
     content: Implement convex/notifications.ts (listForMe, markRead, markAllRead) and NotificationBell + NotificationListener client components with Sonner toasts
     status: pending
@@ -37,7 +37,7 @@ todos:
     status: pending
   - id: seed
     content: Write convex/seed.ts internalMutation seeding 2 managers, 3 technicians, ~10 quotes (mix of unscheduled and scheduled) and document `npx convex run seed:run`
-    status: pending
+    status: cancelled
   - id: deploy
     content: "Set up Vercel project: env vars, Build Command `npx convex deploy --cmd 'next build'`, Clerk production instance, smoke-test live URL"
     status: pending

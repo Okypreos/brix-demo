@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Reserved for one-off local scripts (e.g. ad-hoc data fixes against
+# a live Convex deployment). Anything secret or environment-specific
+# stays out of git history.
+/scripts/

@@ -14,6 +14,10 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Reference repos used for research only.
     "clones/**",
+    // Convex codegen — owned by `npx convex dev`, not us. Convex ships
+    // its own `eslint-disable` directives that newer ESLint flags as
+    // unused; ignoring the folder is the cleanest fix.
+    "convex/_generated/**",
   ]),
 ]);
 

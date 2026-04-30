@@ -32,7 +32,10 @@ export default function RootLayout({
     // ClerkProvider must wrap ConvexProviderWithClerk so Convex can read
     // the Clerk session via useAuth(). See:
     // https://docs.convex.dev/auth/clerk#nextjs
-    <ClerkProvider>
+    //
+    // afterSignOutUrl lives on the provider in @clerk/nextjs v7 — the
+    // per-component prop on <UserButton/> was removed.
+    <ClerkProvider afterSignOutUrl="/">
       <ConvexClientProvider>
         <html
           lang="en"
