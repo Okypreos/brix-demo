@@ -435,6 +435,111 @@ export const listForTechnician = query({
 });
 
 /**
+ * Like `listForTechnician`, but eagerly joins each job with its
+ * underlying quote so the calendar can label events without a second
+ * round-trip. Returns the canonical job fields plus a small denormal-
+ * ised `quote` block (title, customerName, customerAddress).
+ *
+ * Why a separate query rather than extending `listForTechnician`?
+ *   - Some callers (e.g. headless scripts, future mobile clients)
+ *     don't need the join and would pay an extra read per job.
+ *   - The reactive subscription includes the quotes in its read set,
+ *     so a quote being renamed mid-day instantly updates the
+ *     calendar event title — exactly what we want for this caller,
+ *     overhead we don't want for others.
+ *
+ * Auth model is identical to `listForTechnician`.
+ */
+const jobWithQuoteValidator = v.object({
+  _id: v.id("jobs"),
+  _creationTime: v.number(),
+  quoteId: v.id("quotes"),
+  technicianId: v.id("technicians"),
+  managerId: v.id("managers"),
+  start: v.number(),
+  end: v.number(),
+  status: v.union(v.literal("scheduled"), v.literal("completed")),
+  completedAt: v.optional(v.number()),
+  quote: v.object({
+    title: v.string(),
+    description: v.string(),
+    customerName: v.string(),
+    customerAddress: v.optional(v.string()),
+  }),
+});
+
+export const listWithQuotes = query({
+  args: {
+    technicianId: v.optional(v.id("technicians")),
+    rangeStart: v.optional(v.number()),
+    rangeEnd: v.optional(v.number()),
+  },
+  returns: v.array(jobWithQuoteValidator),
+  handler: async (ctx, { technicianId, rangeStart, rangeEnd }) => {
+    const me = await getCurrentUser(ctx);
+    if (!me) {
+      throw new ConvexError({
+        code: "UNAUTHENTICATED",
+        message: "Sign in to view jobs.",
+      });
+    }
+
+    let targetId: Id<"technicians">;
+    if (me.kind === "technician") {
+      targetId = me.doc._id;
+    } else {
+      if (!technicianId) {
+        throw new ConvexError({
+          code: "INVALID_INPUT",
+          message: "Manager calls must specify a technicianId.",
+        });
+      }
+      targetId = technicianId;
+    }
+
+    const jobs = await ctx.db
+      .query("jobs")
+      .withIndex("by_technicianId_and_start", (q) => {
+        const base = q.eq("technicianId", targetId);
+        return rangeEnd !== undefined ? base.lt("start", rangeEnd) : base;
+      })
+      .order("asc")
+      .take(200);
+
+    const filtered =
+      rangeStart !== undefined
+        ? jobs.filter((j) => j.end > rangeStart)
+        : jobs;
+
+    // Batch-load the quotes for all jobs we're returning. We could
+    // also `Promise.all(filtered.map(...))` but a sequential loop is
+    // negligibly slower for typical sizes (≤ 200) and keeps the read
+    // set order deterministic, which makes Convex's reactive cache
+    // behaviour easier to reason about.
+    const out = [];
+    for (const job of filtered) {
+      const quote = await ctx.db.get(job.quoteId);
+      if (!quote) {
+        // Defensive: a job without its quote is a corruption. Skip
+        // rather than throw so a single bad row doesn't blank the
+        // technician's calendar.
+        continue;
+      }
+      out.push({
+        ...job,
+        quote: {
+          title: quote.title,
+          description: quote.description,
+          customerName: quote.customerName,
+          customerAddress: quote.customerAddress,
+        },
+      });
+    }
+    return out;
+  },
+});
+
+/**
  * Lists every job in a date range across all technicians. Manager-only
  * — this drives the cross-tech calendar view (Step 8). For now it's
  * implemented with `_creationTime` desc + an in-memory range filter,

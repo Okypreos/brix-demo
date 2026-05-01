@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/convex/_generated/api";
-import type { Id } from "@/convex/_generated/dataModel";
+import type { Doc, Id } from "@/convex/_generated/dataModel";
 import {
   combineDateAndTime,
   formatJobWindow,
@@ -82,6 +82,44 @@ function defaultDuration(estimatedHours: number): number {
 const TIME_OPTIONS = buildTimeOptions();
 
 /**
+ * Picks the next available `(date, "HH:mm")` pair from `TIME_OPTIONS`.
+ *
+ * - If today still has a slot strictly later than `now + bufferMs`,
+ *   return today + that slot.
+ * - Otherwise (e.g. it's already 8pm), roll the date forward to
+ *   tomorrow and default to the first slot of the day (06:00).
+ *
+ * The buffer is intentionally small (60s); the real safety net is the
+ * 5-minute grace inside `validateWindow` server-side. The buffer just
+ * keeps the *displayed* default visibly in the future so the user
+ * doesn't open the dialog and immediately see a slot that's already
+ * past.
+ */
+function nextAvailableSlot(
+  now: Date = new Date(),
+  bufferMs = 60_000,
+): { date: Date; startTime: string } {
+  const threshold = now.getTime() + bufferMs;
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+
+  for (const option of TIME_OPTIONS) {
+    const [hh, mm] = option.split(":");
+    const candidate = new Date(today);
+    candidate.setHours(Number.parseInt(hh, 10), Number.parseInt(mm, 10), 0, 0);
+    if (candidate.getTime() > threshold) {
+      return { date: today, startTime: option };
+    }
+  }
+
+  // No slot left today — roll forward to tomorrow at the first slot
+  // (06:00 by default; tracks `buildTimeOptions`'s start hour).
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return { date: tomorrow, startTime: TIME_OPTIONS[0] };
+}
+
+/**
  * Schedule a Quote: pick a technician, a date, a start time, and a
  * duration. On submit, calls `jobs.assign` which atomically inserts
  * the job, flips the quote to scheduled, and notifies the technician
@@ -105,17 +143,22 @@ export function AssignJobForm({
   const technicians = useQuery(api.users.listTechnicians);
   const assign = useMutation(api.jobs.assign);
 
-  // Default the date to "today at 9am" so the form lands in a usable
-  // state. The user can change either with one interaction.
-  const defaults = useMemo<AssignJobFormValues>(
-    () => ({
+  // Default to the next available business-hours slot so the form
+  // lands in a usable state without tripping the server's "no past
+  // start" guard. If today is exhausted (e.g. opened at 9pm), this
+  // rolls forward to tomorrow at 06:00. See `nextAvailableSlot`.
+  // We compute it once per dialog open per quote — `useMemo` keys on
+  // `quote.estimatedHours` keep the user's in-progress edits stable
+  // across re-renders.
+  const defaults = useMemo<AssignJobFormValues>(() => {
+    const { date, startTime } = nextAvailableSlot();
+    return {
       technicianId: "",
-      date: new Date(),
-      startTime: "09:00",
+      date,
+      startTime,
       durationHours: defaultDuration(quote.estimatedHours),
-    }),
-    [quote.estimatedHours],
-  );
+    };
+  }, [quote.estimatedHours]);
 
   const {
     control,
@@ -212,7 +255,7 @@ export function AssignJobForm({
                     <SelectValue placeholder="Pick a technician" />
                   </SelectTrigger>
                   <SelectContent>
-                    {technicians.map((t) => (
+                    {technicians.map((t: Doc<"technicians">) => (
                       <SelectItem key={t._id} value={t._id}>
                         {t.name}
                       </SelectItem>

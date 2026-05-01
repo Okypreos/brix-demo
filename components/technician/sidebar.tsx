@@ -2,19 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ClipboardList, LayoutDashboard } from "lucide-react";
+import { CalendarDays } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * Static nav config. Add new sections here; the sidebar will pick them
- * up automatically. `match` controls active highlighting:
- *  - "exact"  -> highlights only on the exact URL
- *  - "prefix" -> highlights on any descendant route (so /quotes/[id]
- *                still highlights "Quotes")
+ * Technician sidebar nav.
  *
- * Only routes that actually exist are listed here. Adding a link for
- * a route that doesn't have an `app/(manager)/<segment>/page.tsx` will
- * show a 404 to the user — better to grow the nav as the routes land.
+ * Currently a single entry — the schedule. Kept as a config-driven
+ * array (rather than a single `<Link>`) so adding "Profile",
+ * "History", or "Earnings" later is a one-line change matching the
+ * pattern in `components/manager/sidebar.tsx`.
  */
 const NAV: Array<{
   href: string;
@@ -22,24 +19,28 @@ const NAV: Array<{
   icon: React.ComponentType<{ className?: string }>;
   match: "exact" | "prefix";
 }> = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, match: "exact" },
-  { href: "/quotes", label: "Quotes", icon: ClipboardList, match: "prefix" },
+  {
+    href: "/schedule",
+    label: "Schedule",
+    icon: CalendarDays,
+    match: "prefix",
+  },
 ];
 
-export function ManagerSidebar() {
+export function TechnicianSidebar() {
   const pathname = usePathname();
 
   return (
     <aside className="hidden md:flex md:flex-col md:sticky md:top-0 md:h-dvh border-r border-border bg-card">
       <div className="px-6 py-5">
         <Link
-          href="/dashboard"
+          href="/schedule"
           className="block font-heading text-lg font-semibold tracking-widest uppercase"
         >
           Brix
         </Link>
         <p className="mt-1 text-xs uppercase tracking-widest text-muted-foreground">
-          Operations
+          Field
         </p>
       </div>
       <nav className="flex flex-1 flex-col gap-1 px-3 py-2">

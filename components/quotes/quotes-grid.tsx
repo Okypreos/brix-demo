@@ -5,7 +5,7 @@ import { ClipboardList } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { QuoteCard } from "./quote-card";
-import type { QuoteStatus } from "@/lib/types";
+import type { Quote, QuoteStatus } from "@/lib/types";
 
 /**
  * Reactive grid of quote cards.
@@ -47,7 +47,7 @@ export function QuotesGrid({
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-      {quotes.map((quote) => (
+      {quotes.map((quote: Quote) => (
         <QuoteCard key={quote._id} quote={quote} />
       ))}
     </div>

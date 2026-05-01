@@ -1,5 +1,7 @@
 import { UserButton } from "@clerk/nextjs";
 import { ManagerSidebar } from "./sidebar";
+import { NotificationsSlot } from "@/components/notifications/notifications-slot";
+import { AuthenticatedShell } from "@/components/layout/authenticated-shell";
 import type { CurrentManager } from "@/lib/auth/types";
 
 /**
@@ -7,12 +9,20 @@ import type { CurrentManager } from "@/lib/auth/types";
  *
  * Layout: a CSS grid with a fixed sidebar column and a flexible main
  * column. The sidebar is sticky so navigation stays put while pages
- * scroll. Future steps can drop additional widgets (notification bell,
- * date selector, etc.) into the header without restructuring.
+ * scroll.
  *
- * The sidebar is split into its own client component because it needs
- * `usePathname` to highlight the active route; everything else here is
- * static and stays in a Server Component for free SSR.
+ * Client components composed in:
+ *  - <ManagerSidebar/>     — uses usePathname for active highlighting.
+ *  - <NotificationsSlot/>  — wraps the bell + toast bridge inside a
+ *                            Convex `<Authenticated>` boundary so the
+ *                            auth-gated `notifications.*` queries are
+ *                            never called during the brief sign-out /
+ *                            sign-in transition.
+ *  - <AuthenticatedShell/> — same boundary, but for the page `children`.
+ *                            Means *every* auth-gated `useQuery` on a
+ *                            manager page is automatically suppressed
+ *                            during the transient sign-out window — no
+ *                            per-page wrapping required.
  */
 export function ManagerShell({
   user,
@@ -33,10 +43,13 @@ export function ManagerShell({
             <span className="text-sm font-medium">{user.name}</span>
           </div>
           <div className="flex items-center gap-3">
+            <NotificationsSlot />
             <UserButton />
           </div>
         </header>
-        <main className="flex-1 overflow-x-hidden px-6 py-8">{children}</main>
+        <main className="flex-1 overflow-x-hidden px-6 py-8">
+          <AuthenticatedShell>{children}</AuthenticatedShell>
+        </main>
       </div>
     </div>
   );

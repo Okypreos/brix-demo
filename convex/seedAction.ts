@@ -56,6 +56,18 @@ const DEMO_USERS: SeedUser[] = [
     role: "manager",
   },
   {
+    email: "manager.morgan@example.com",
+    firstName: "Morgan",
+    lastName: "Lee",
+    role: "manager",
+  },
+  {
+    email: "manager.casey@example.com",
+    firstName: "Casey",
+    lastName: "Brooks",
+    role: "manager",
+  },
+  {
     email: "tech.jordan@example.com",
     firstName: "Jordan",
     lastName: "Rivera",
@@ -188,7 +200,17 @@ export const run = internalAction({
     quotes: v.object({ created: v.number(), skipped: v.number() }),
     jobs: v.object({ created: v.number(), skipped: v.number() }),
   }),
-  handler: async (ctx) => {
+  handler: async (ctx): Promise<{
+    users: Array<{
+      email: string;
+      clerkId: string;
+      role: "manager" | "technician";
+      wasCreated: boolean;
+      emailVerified: boolean;
+    }>;
+    quotes: { created: number; skipped: number };
+    jobs: { created: number; skipped: number };
+  }> => {
     const secretKey = process.env.CLERK_SECRET_KEY;
     if (!secretKey) {
       throw new ConvexError(
@@ -319,6 +341,13 @@ export const run = internalAction({
 
     // ---------------------------------------------------------------
     // Step 3 — promote managers. Idempotent.
+    //
+    // We promote *every* user in DEMO_USERS with role=manager (so all
+    // demo manager accounts can sign in and see the manager workspace),
+    // but we record the **first** manager listed as the canonical
+    // seeder of quotes and jobs. This keeps re-seeded historical data
+    // attributed to the same user across runs even when extra demo
+    // managers are added to DEMO_USERS later.
     // ---------------------------------------------------------------
     let managerClerkId: string | null = null;
     for (const u of userResults) {
@@ -326,7 +355,9 @@ export const run = internalAction({
       await ctx.runMutation(internal.users.promoteToManager, {
         clerkId: u.clerkId,
       });
-      managerClerkId = u.clerkId;
+      if (managerClerkId === null) {
+        managerClerkId = u.clerkId;
+      }
     }
     if (!managerClerkId) {
       throw new ConvexError(
@@ -337,8 +368,18 @@ export const run = internalAction({
 
     // ---------------------------------------------------------------
     // Step 4 — seed quotes.
+    //
+    // The explicit `: { created: number; ... }` annotation breaks a
+    // TypeScript inference cycle: without it, TS tries to derive
+    // `run`'s return type from its handler, while the handler depends
+    // on `internal.seed.*` which (in the same module graph) references
+    // back to `run`. The annotation gives TS a concrete anchor.
     // ---------------------------------------------------------------
-    const quoteRes = await ctx.runMutation(internal.seed.seedDemoQuotes, {
+    const quoteRes: {
+      created: number;
+      skipped: number;
+      quoteIds: string[];
+    } = await ctx.runMutation(internal.seed.seedDemoQuotes, {
       managerClerkId,
       quotes: DEMO_QUOTES,
     });
@@ -368,11 +409,14 @@ export const run = internalAction({
       };
     });
 
-    const jobRes = await ctx.runMutation(internal.seed.seedDemoJobs, {
-      managerClerkId,
-      now: Date.now(),
-      jobs: jobInputs,
-    });
+    const jobRes: { created: number; skipped: number } = await ctx.runMutation(
+      internal.seed.seedDemoJobs,
+      {
+        managerClerkId,
+        now: Date.now(),
+        jobs: jobInputs,
+      },
+    );
 
     return {
       users: userResults,

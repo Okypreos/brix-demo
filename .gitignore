@@ -44,3 +44,6 @@ next-env.d.ts
 # a live Convex deployment). Anything secret or environment-specific
 # stays out of git history.
 /scripts/
+
+# Local reference repos / experiments not part of the app runtime.
+/clones/

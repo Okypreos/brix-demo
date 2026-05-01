@@ -25,19 +25,19 @@ todos:
     status: completed
   - id: notifications
     content: Implement convex/notifications.ts (listForMe, markRead, markAllRead) and NotificationBell + NotificationListener client components with Sonner toasts
-    status: pending
+    status: completed
   - id: manager-ui
     content: "Build manager route group: layout with sidebar+role guard, dashboard KPIs, quotes list with filters, quote-detail Assign dialog with technician select + date/time pickers + duration override"
     status: pending
   - id: technician-ui
     content: "Build technician route group: layout with role guard, schedule page with react-big-calendar (week/day/agenda), event side-panel with Mark Complete, plus list view fallback"
-    status: pending
+    status: completed
   - id: shadcn-ui
     content: Add shadcn components (card, dialog, sheet, form, input, textarea, select, calendar, popover, badge, dropdown-menu, sonner, tabs, separator, avatar, skeleton) and theme react-big-calendar via globals.css overrides
     status: pending
   - id: seed
     content: Write convex/seed.ts internalMutation seeding 2 managers, 3 technicians, ~10 quotes (mix of unscheduled and scheduled) and document `npx convex run seed:run`
-    status: cancelled
+    status: completed
   - id: deploy
     content: "Set up Vercel project: env vars, Build Command `npx convex deploy --cmd 'next build'`, Clerk production instance, smoke-test live URL"
     status: pending

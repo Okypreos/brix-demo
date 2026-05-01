@@ -1,4 +1,4 @@
-import { format } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 
 /**
  * Combines a calendar date (Date object whose time portion is ignored)
@@ -53,4 +53,17 @@ export function formatTimeRange(start: number, end: number) {
   const startTime = format(new Date(start), "h:mma").toLowerCase();
   const endTime = format(new Date(end), "h:mma").toLowerCase();
   return `${startTime} – ${endTime}`;
+}
+
+/**
+ * Formats an epoch-ms timestamp as "5 minutes ago" / "2 hours ago" /
+ * "3 days ago" — used for the timestamp on each notification row.
+ *
+ * For very recent events (< 30s) date-fns returns "less than a minute
+ * ago" which is wordy; we override that case with "just now".
+ */
+export function formatRelativeTime(epochMs: number) {
+  const diffMs = Date.now() - epochMs;
+  if (diffMs < 30_000) return "just now";
+  return formatDistanceToNow(new Date(epochMs), { addSuffix: true });
 }

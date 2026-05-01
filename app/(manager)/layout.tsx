@@ -42,16 +42,15 @@ export default async function ManagerLayout({
 
   if (!me) {
     // Webhook hasn't landed yet — extremely rare on a navigation, but
-    // possible for a freshly-created account. Bounce to the landing
-    // page where the client-side `useCurrentUser` hook displays a
-    // friendly "syncing your account" message.
+    // possible for a freshly-created account. Bounce to `/`, where the
+    // server-rendered home page detects the same state and shows a
+    // friendly "syncing your account" card.
     redirect("/");
   }
 
   if (me.kind !== "manager") {
-    // Eventually `redirect("/schedule")`. Until the technician route
-    // group exists we send them to the landing page.
-    redirect("/");
+    // Technicians get their own workspace at /schedule.
+    redirect("/schedule");
   }
 
   return <ManagerShell user={me}>{children}</ManagerShell>;
