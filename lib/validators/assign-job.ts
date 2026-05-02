@@ -1,17 +1,11 @@
 import { z } from "zod";
 
-/**
- * Client-side validation for the "assign quote → job" form.
- *
- * Mirrors the server-side checks in `convex/jobs.ts:validateWindow`.
- * The server is authoritative — this exists only to give the user
- * instant feedback in the form. Notably:
- *  - `technicianId` is a Convex Id, but we treat it as an opaque
- *    string here: zod can't validate it, the server does.
- *  - `date` is a JS Date with the time portion ignored.
- *  - `startTime` is "HH:MM" 24-hour.
- *  - `durationHours` is in 0.5-h increments, 0.5–24h.
- */
+// Client-side validation for the assign-job form. Mirrors the server
+// checks in convex/jobs.ts:validateWindow — the server is the security
+// boundary, this is just for instant form feedback.
+//
+// `technicianId` is a Convex Id but treated as an opaque string here;
+// the server validates it.
 export const assignJobFormSchema = z.object({
   technicianId: z.string().min(1, "Pick a technician."),
   date: z.date({ message: "Pick a date." }),

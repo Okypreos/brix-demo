@@ -18,16 +18,10 @@ import {
 import { api } from "@/convex/_generated/api";
 import type { Quote } from "@/lib/types";
 
-/**
- * Confirms quote deletion. The server-side `quotes.remove` mutation
- * refuses if the quote has already been scheduled or completed, but we
- * also gate the menu item that opens this dialog so the user shouldn't
- * normally see a FORBIDDEN error here.
- *
- * AlertDialog (vs the regular Dialog) gives us the right semantics for
- * destructive confirmations — focus pinned to the destructive action,
- * no `onOpenChange` close-on-overlay-click.
- */
+// Delete confirmation. AlertDialog (not Dialog) for the destructive
+// semantics — focus pinned on the destructive action and no
+// close-on-overlay-click. The menu item that opens this dialog is
+// already hidden for scheduled/completed quotes.
 export function DeleteQuoteDialog({
   quote,
   open,
@@ -81,9 +75,9 @@ export function DeleteQuoteDialog({
           <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
           <AlertDialogAction
             onClick={(e) => {
-              // Prevent radix from auto-closing before the mutation
-              // finishes; we close manually in handleConfirm so the
-              // dialog stays open if the server rejects the delete.
+              // Prevent radix auto-close — we close manually in
+              // handleConfirm so the dialog stays open if the server
+              // rejects the delete.
               e.preventDefault();
               void handleConfirm();
             }}

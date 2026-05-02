@@ -5,41 +5,20 @@ import { ConvexError, v } from "convex/values";
 import { internalAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 
-/**
- * Demo seeder orchestrator.
- *
- * Run from the repo root with:
- *
- *   npx convex run seedAction:run
- *
- * Idempotent: it can be run multiple times against the same deployment
- * without producing duplicate users, quotes, or jobs. Each step looks
- * up existing rows by a stable key (Clerk email / quote title / quote
- * id) before inserting.
- *
- * Why a Node-runtime action?
- *
- * - `@clerk/backend` uses Node APIs that aren't available in Convex's
- *   default V8 isolate, so this file is pinned to "use node".
- * - Internal actions can call internal mutations via `ctx.runMutation`
- *   without any auth setup, so we keep the entire seed inside Convex
- *   (no `scripts/` orchestrator needed).
- * - `CLERK_SECRET_KEY` lives only in Convex's env vars, never in the
- *   browser bundle.
- *
- * Required Convex env vars:
- *   CLERK_SECRET_KEY        — set with `npx convex env set CLERK_SECRET_KEY sk_test_...`
- *   CLERK_FRONTEND_API_URL  — already required by the webhook handler
- *   DEMO_USER_PASSWORD      — password assigned to every seeded demo user.
- *                             Kept out of the repo so this file can stay
- *                             public; you communicate it to reviewers
- *                             out-of-band (e.g. by email) along with the
- *                             demo email addresses.
- */
-
-// -----------------------------------------------------------------------
-// Demo data definitions. Edit these to change what the demo looks like.
-// -----------------------------------------------------------------------
+// Demo seeder orchestrator. Run from the repo root with:
+//   npx convex run seedAction:run
+//
+// Idempotent. Each step looks up existing rows by a stable key (Clerk
+// email / quote title / quote id) before inserting.
+//
+// "use node" because @clerk/backend uses Node APIs that aren't in
+// Convex's default V8 isolate.
+//
+// Required env vars (set via `npx convex env set ...`):
+//   CLERK_SECRET_KEY        — Clerk Backend SDK key
+//   CLERK_FRONTEND_API_URL  — also used by the webhook handler
+//   DEMO_USER_PASSWORD      — password for every seeded demo user.
+//                             Communicated to reviewers out-of-band.
 
 type SeedUser = {
   email: string;
@@ -141,18 +120,16 @@ const DEMO_QUOTES = [
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
-/**
- * Demo job assignments. Offsets are relative to "now" at seed time, so
- * a fresh seed always shows yesterday's completed work + this week's
- * upcoming jobs.
- *
- * Indices into DEMO_QUOTES + DEMO_USERS (technicians only). Keeping
- * raw indices instead of titles/emails keeps the table compact and
- * prevents typo drift.
- */
+// Demo job assignments. Offsets are relative to "now" at seed time, so
+// a fresh seed always shows yesterday's completed work + this week's
+// upcoming jobs.
+//
+// `quoteIdx` and `techIdx` are indices into DEMO_QUOTES and the
+// technicians-only sub-list of DEMO_USERS. Raw indices keep the table
+// compact and prevent typo drift.
 const DEMO_JOBS: Array<{
   quoteIdx: number;
-  techIdx: number; // 0-based into the technicians-only sub-list
+  techIdx: number;
   startOffsetMs: number;
   durationMs: number;
   complete?: boolean;
@@ -180,10 +157,6 @@ const DEMO_JOBS: Array<{
     durationMs: 3 * HOUR_MS,
   },
 ];
-
-// -----------------------------------------------------------------------
-// Action
-// -----------------------------------------------------------------------
 
 export const run = internalAction({
   args: {},
@@ -222,16 +195,12 @@ export const run = internalAction({
     if (!demoPassword) {
       throw new ConvexError(
         "DEMO_USER_PASSWORD is not set on this Convex deployment. " +
-          "Run `npx convex env set DEMO_USER_PASSWORD <password>` first. " +
-          "The password must satisfy your Clerk instance's password policy " +
-          "(or contain enough entropy that skipPasswordChecks lets it through).",
+          "Run `npx convex env set DEMO_USER_PASSWORD <password>` first.",
       );
     }
     const clerk = createClerkClient({ secretKey });
 
-    // ---------------------------------------------------------------
     // Step 1 — create-or-fetch each Clerk user.
-    // ---------------------------------------------------------------
     const userResults: Array<{
       email: string;
       clerkId: string;
@@ -246,10 +215,6 @@ export const run = internalAction({
         limit: 1,
       });
 
-      // We need the full User object (with `emailAddresses` populated)
-      // for the verification pass below, regardless of whether we
-      // created or fetched it. `getUserList` already returns full
-      // User objects, so no follow-up fetch is needed.
       let clerkUser;
       let wasCreated = false;
       if (existing.data.length > 0) {
@@ -260,38 +225,24 @@ export const run = internalAction({
           password: demoPassword,
           firstName: u.firstName,
           lastName: u.lastName,
-          // Allow a deliberately well-known shared password through
-          // Clerk's leaked-password heuristics — this is a demo
-          // account, not a real user.
+          // Skip leaked-password heuristics — this is a demo account.
           skipPasswordChecks: true,
           skipPasswordRequirement: false,
         });
         wasCreated = true;
       }
 
-      // -------------------------------------------------------------
       // Step 1.5 — mark the primary email as verified.
       //
-      // The Backend API doesn't auto-verify the email when creating
-      // a user with a password (this is by design — production flows
-      // verify via email link/code). For a demo seed where we own
-      // the addresses (`@example.com`, no real inbox), we flip
-      // `verified: true` administratively. Otherwise sign-in routes
-      // every demo reviewer through Clerk's email-verification flow,
-      // which never completes.
-      //
-      // Idempotent: we only call updateEmailAddress if the email
-      // isn't already verified, so re-runs are essentially free.
-      // -------------------------------------------------------------
+      // Backend API doesn't auto-verify on creation (production flows
+      // verify via email link). For demo addresses (@example.com, no
+      // real inbox) we flip verified=true so sign-in works.
+      // Idempotent: only updates if not already verified.
       let emailVerified = true;
       for (const ea of clerkUser.emailAddresses) {
         if (ea.verification?.status !== "verified") {
           await clerk.emailAddresses.updateEmailAddress(ea.id, {
             verified: true,
-            // Make sure the address we just created is also primary
-            // (it will already be on freshly-created users, but
-            // re-running on an instance that somehow lost the
-            // primary flag will heal itself).
             primary: ea.id === clerkUser.primaryEmailAddressId,
           });
           emailVerified = true;
@@ -307,19 +258,13 @@ export const run = internalAction({
       });
     }
 
-    // ---------------------------------------------------------------
     // Step 2 — wait for each Clerk user to be mirrored into Convex by
-    // the user.created webhook. We poll the byClerkId query for each.
-    //
-    // If you've never set up the webhook (or it's pointed at a stale
-    // tunnel), this loop will time out with a clear message.
-    // ---------------------------------------------------------------
+    // the user.created webhook. Times out with a clear message if the
+    // webhook isn't configured or is pointed at a stale tunnel.
     for (const u of userResults) {
       const startedAt = Date.now();
       const TIMEOUT_MS = 10_000;
       const POLL_MS = 250;
-      // Loop runs in a Node action; ctx.runQuery is awaited each iter
-      // so the schedule is well-behaved (no busy-spin).
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const found = await ctx.runQuery(api.users.byClerkId, {
@@ -339,16 +284,10 @@ export const run = internalAction({
       }
     }
 
-    // ---------------------------------------------------------------
-    // Step 3 — promote managers. Idempotent.
-    //
-    // We promote *every* user in DEMO_USERS with role=manager (so all
-    // demo manager accounts can sign in and see the manager workspace),
-    // but we record the **first** manager listed as the canonical
-    // seeder of quotes and jobs. This keeps re-seeded historical data
-    // attributed to the same user across runs even when extra demo
-    // managers are added to DEMO_USERS later.
-    // ---------------------------------------------------------------
+    // Step 3 — promote managers. We promote every role=manager user so
+    // each manager account can sign in, but record the FIRST one as
+    // the canonical seeder of quotes and jobs. Keeps re-seeded data
+    // attributed to the same user across runs.
     let managerClerkId: string | null = null;
     for (const u of userResults) {
       if (u.role !== "manager") continue;
@@ -366,15 +305,10 @@ export const run = internalAction({
       );
     }
 
-    // ---------------------------------------------------------------
     // Step 4 — seed quotes.
     //
-    // The explicit `: { created: number; ... }` annotation breaks a
-    // TypeScript inference cycle: without it, TS tries to derive
-    // `run`'s return type from its handler, while the handler depends
-    // on `internal.seed.*` which (in the same module graph) references
-    // back to `run`. The annotation gives TS a concrete anchor.
-    // ---------------------------------------------------------------
+    // The explicit return type annotation breaks a TS inference cycle
+    // between `run`'s return type and `internal.seed.*` references.
     const quoteRes: {
       created: number;
       skipped: number;
@@ -384,9 +318,7 @@ export const run = internalAction({
       quotes: DEMO_QUOTES,
     });
 
-    // ---------------------------------------------------------------
     // Step 5 — seed jobs.
-    // ---------------------------------------------------------------
     const technicianClerkIds = userResults
       .filter((u) => u.role === "technician")
       .map((u) => u.clerkId);

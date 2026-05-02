@@ -4,13 +4,8 @@ import { useQuery } from "convex/react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/convex/_generated/api";
 
-/**
- * Reactive KPI strip on the dashboard.
- *
- * Subscribed to `quotes.counts` so the moment a quote is created (or a
- * job is completed in a later step) the numbers tick. Loading state
- * uses skeletons so the layout doesn't jump when the data arrives.
- */
+// Reactive KPI strip. Subscribes to `quotes.counts` so numbers tick
+// the moment a quote is created or a job completes.
 export function DashboardKpis() {
   const counts = useQuery(api.quotes.counts);
   const isLoading = counts === undefined;

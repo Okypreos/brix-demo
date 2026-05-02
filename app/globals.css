@@ -46,6 +46,36 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+
+  /*
+   * Bell-shake animation for the notifications header icon. Registered
+   * as a Tailwind v4 theme token so we get an `animate-bell-shake`
+   * utility (see https://tailwindcss.com/docs/animation#customizing-your-theme
+   * — v4 generates utilities for any `--animate-*` custom property).
+   *
+   * Plays *once* per trigger (no `infinite`): a brief
+   * decaying-amplitude pendulum that lasts ~0.9s and ends with the
+   * bell back at rest. The bell shakes when a new unread notification
+   * arrives — see `<NotificationBell/>`'s `shakeKey` mechanism for
+   * how the animation is restarted on each new arrival rather than
+   * looping continuously.
+   *
+   * Combine with `origin-top` at the call site so the icon pivots
+   * from the bell's crown (like a real hanging bell), and gate behind
+   * `motion-safe:` so users with `prefers-reduced-motion: reduce`
+   * are spared.
+   */
+  --animate-bell-shake: bell-shake 0.9s ease-in-out;
+}
+
+@keyframes bell-shake {
+  0%   { transform: rotate(0); }
+  15%  { transform: rotate(-12deg); }
+  30%  { transform: rotate(10deg); }
+  45%  { transform: rotate(-8deg); }
+  60%  { transform: rotate(6deg); }
+  75%  { transform: rotate(-3deg); }
+  100% { transform: rotate(0); }
 }
 
 :root {

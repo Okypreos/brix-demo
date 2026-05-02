@@ -4,15 +4,8 @@ import {
   format,
 } from "date-fns";
 
-/**
- * Human-friendly "created N ago" string.
- *
- * - Same day -> "12 minutes ago", "3 hours ago"
- * - Older    -> "Apr 15, 2026"
- *
- * Switches to an absolute date past today because relative dates
- * become hard to scan once you're at "8 days ago" / "3 weeks ago".
- */
+// "12 minutes ago" today, "Apr 15, 2026" once it's older. Relative
+// dates get hard to scan past a day or two.
 export function formatCreatedAgo(epochMs: number) {
   const date = new Date(epochMs);
   if (isToday(date)) {

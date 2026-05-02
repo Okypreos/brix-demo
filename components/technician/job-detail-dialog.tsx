@@ -21,24 +21,12 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { formatJobWindow, formatRelativeTime } from "@/lib/format/datetime";
 
-/**
- * Modal showing the full details of a single job and a "Mark complete"
- * action when the job is still scheduled.
- *
- * Data: the parent passes the *already-hydrated* job + quote (from
- * the calendar's `listWithQuotes` query). That keeps this component
- * a pure consumer — no extra subscriptions, no auth concerns about
- * a separate `quotes.get` for technicians. The cost is that if the
- * underlying job changes while the dialog is open, the dialog won't
- * update (the parent's calendar query will, though, and the next
- * open will be fresh). For a "click-to-complete" interaction this
- * is the right trade-off.
- *
- * Closing rules:
- *  - The dialog respects the parent's open state.
- *  - The "Mark complete" mutation closes the dialog on success.
- *  - We block close while the mutation is in flight.
- */
+// Job detail modal. Parent passes a hydrated job+quote (from the
+// calendar's listWithQuotes), so this component owns no subscriptions.
+//
+// readOnly hides the "Mark complete" button for the manager view —
+// the backend would reject it anyway (jobs.complete requires
+// requireTechnician). Hiding (vs disabling) is the honest signal.
 export type JobDetail = {
   jobId: Id<"jobs">;
   start: number;
@@ -57,10 +45,13 @@ export function JobDetailDialog({
   job,
   open,
   onOpenChange,
+  readOnly = false,
 }: {
   job: JobDetail | null;
   open: boolean;
   onOpenChange: (next: boolean) => void;
+  // Hide the "Mark complete" button (manager view).
+  readOnly?: boolean;
 }) {
   const completeJob = useMutation(api.jobs.complete);
   const [submitting, setSubmitting] = useState(false);
@@ -88,7 +79,7 @@ export function JobDetailDialog({
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        // Block close while the mutation is in flight.
+        // Don't let the user close mid-submit.
         if (submitting && !next) return;
         onOpenChange(next);
       }}
@@ -141,7 +132,7 @@ export function JobDetailDialog({
             </div>
 
             <DialogFooter>
-              {job.status === "scheduled" ? (
+              {!readOnly && job.status === "scheduled" ? (
                 <Button onClick={onComplete} disabled={submitting}>
                   <CheckCircle2 />
                   {submitting ? "Marking…" : "Mark complete"}

@@ -2,101 +2,72 @@ import { ConvexError, v, type Validator } from "convex/values";
 import type { UserJSON } from "@clerk/backend";
 import { internalMutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-import { getCurrentUser } from "./lib/auth";
+import { getCurrentUser, requireManager } from "./lib/auth";
 
-/**
- * Subscribed to from the client to know whether the Clerk user has been
- * mirrored into our database yet (the webhook can lag a few hundred ms
- * after sign-up). Returns the same discriminated-union shape as
- * `lib/auth.getCurrentUser`.
- */
+const userValidator = v.object({
+  _id: v.id("users"),
+  _creationTime: v.number(),
+  tokenIdentifier: v.string(),
+  clerkId: v.string(),
+  name: v.string(),
+  email: v.string(),
+  role: v.union(v.literal("manager"), v.literal("technician")),
+  color: v.optional(v.string()),
+});
+
+// Subscribed to from the client to know whether the Clerk user has
+// been mirrored into Convex yet (the webhook can lag a few hundred ms).
+// Consumers branch on `user.role` to decide what to render.
 export const current = query({
   args: {},
-  returns: v.union(
-    v.object({
-      kind: v.literal("manager"),
-      _id: v.id("managers"),
-      _creationTime: v.number(),
-      tokenIdentifier: v.string(),
-      clerkId: v.string(),
-      name: v.string(),
-      email: v.string(),
-    }),
-    v.object({
-      kind: v.literal("technician"),
-      _id: v.id("technicians"),
-      _creationTime: v.number(),
-      tokenIdentifier: v.string(),
-      clerkId: v.string(),
-      name: v.string(),
-      email: v.string(),
-      color: v.optional(v.string()),
-    }),
-    v.null(),
-  ),
+  returns: v.union(userValidator, v.null()),
   handler: async (ctx) => {
-    const user = await getCurrentUser(ctx);
-    if (!user) return null;
-    return user.kind === "manager"
-      ? { kind: "manager" as const, ...user.doc }
-      : { kind: "technician" as const, ...user.doc };
+    return await getCurrentUser(ctx);
   },
 });
 
-/**
- * Lists all technicians (used by managers in the assignment dropdown).
- * Bounded with `.take(200)` per the Convex query guidelines — a real
- * deployment with more techs would paginate.
- */
+// All technicians. Used by the assign-job dropdown and the technicians
+// grid. Capped at 200 — would paginate at real scale.
 export const listTechnicians = query({
   args: {},
-  returns: v.array(
-    v.object({
-      _id: v.id("technicians"),
-      _creationTime: v.number(),
-      tokenIdentifier: v.string(),
-      clerkId: v.string(),
-      name: v.string(),
-      email: v.string(),
-      color: v.optional(v.string()),
-    }),
-  ),
+  returns: v.array(userValidator),
   handler: async (ctx) => {
-    return await ctx.db.query("technicians").take(200);
+    return await ctx.db
+      .query("users")
+      .withIndex("by_role", (q) => q.eq("role", "technician"))
+      .take(200);
   },
 });
 
-// -----------------------------------------------------------------------
-// Webhook-driven mutations.
+// Single technician by id. Manager-only.
 //
-// These are `internalMutation`s — only callable from other Convex code
-// (specifically `convex/http.ts:clerk-users-webhook`). They are NEVER
-// exposed to the public API surface, so a malicious client cannot fake
-// a Clerk event to provision themselves into the database.
-// -----------------------------------------------------------------------
+// Returns null when the row is missing or when the id resolves to a
+// non-technician — defensive, so a manager id reaching this URL 404s
+// rather than leaking a manager profile.
+export const getTechnician = query({
+  args: { id: v.id("users") },
+  returns: v.union(userValidator, v.null()),
+  handler: async (ctx, { id }) => {
+    await requireManager(ctx);
+    const user = await ctx.db.get(id);
+    if (!user || user.role !== "technician") return null;
+    return user;
+  },
+});
 
-/**
- * Mirrors a Clerk user into Convex. Called on `user.created` and
- * `user.updated` webhook events.
- *
- * New sign-ups land in `technicians` by default. Promotion to a manager
- * is a separate explicit step (see `promoteToManager`) so role authority
- * stays server-side: a malicious user can't self-elevate by setting their
- * own Clerk public metadata.
- *
- * Idempotent: looking up by `clerkId` and patching/inserting accordingly
- * means Clerk's automatic webhook retries are safe.
- */
+// Webhook-driven mutations. Only callable from convex/http.ts via the
+// signature-verified Clerk webhook — never from the public API.
+
+// Mirrors a Clerk user into Convex. Called on user.created/updated.
+// New users default to "technician"; promotion is a separate explicit
+// step (`promoteToManager`) so users can't self-elevate via Clerk
+// metadata. Idempotent.
 export const upsertFromClerk = internalMutation({
-  // The Clerk webhook payload is well-typed via `@clerk/backend`'s
-  // `UserJSON`. We pass it through as `v.any()` because runtime-validating
-  // an external payload we already trust (signature-verified) is overhead.
+  // Webhook payload is signature-verified upstream. v.any avoids the
+  // overhead of re-validating something we already trust.
   args: { data: v.any() as Validator<UserJSON> },
-  returns: v.union(
-    v.object({ kind: v.literal("manager"), id: v.id("managers") }),
-    v.object({ kind: v.literal("technician"), id: v.id("technicians") }),
-  ),
-  handler: async (ctx, { data }) => {
+  returns: v.id("users"),
+  handler: async (ctx, { data }): Promise<Id<"users">> => {
     const clerkId = data.id;
     const primaryEmail = data.email_addresses.find(
       (e) => e.id === data.primary_email_address_id,
@@ -106,155 +77,99 @@ export const upsertFromClerk = internalMutation({
       primaryEmail ||
       "Unnamed user";
 
-    // tokenIdentifier is `{issuer}|{subject}` — we don't have the issuer
-    // in the webhook payload, but we do know it's stable per Clerk
-    // instance. Reconstruct it so the auth-time JWT lookup still works.
     const issuer = process.env.CLERK_FRONTEND_API_URL!;
     const tokenIdentifier = `${issuer}|${clerkId}`;
 
-    // Already a manager? Patch in place.
-    const manager = await ctx.db
-      .query("managers")
+    const existing = await ctx.db
+      .query("users")
       .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
       .unique();
-    if (manager) {
-      await ctx.db.patch(manager._id, {
+
+    if (existing) {
+      // Don't touch role here. Promotions/demotions go through
+      // `promoteToManager` so a stale webhook can't accidentally
+      // demote a manager.
+      await ctx.db.patch(existing._id, {
         tokenIdentifier,
         name,
-        email: primaryEmail ?? manager.email,
+        email: primaryEmail ?? existing.email,
       });
-      return { kind: "manager" as const, id: manager._id };
+      return existing._id;
     }
 
-    // Already a technician? Patch in place.
-    const technician = await ctx.db
-      .query("technicians")
-      .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
-      .unique();
-    if (technician) {
-      await ctx.db.patch(technician._id, {
-        tokenIdentifier,
-        name,
-        email: primaryEmail ?? technician.email,
-      });
-      return { kind: "technician" as const, id: technician._id };
-    }
-
-    // First time we've seen this user — default to technician.
-    const id = await ctx.db.insert("technicians", {
+    return await ctx.db.insert("users", {
       tokenIdentifier,
       clerkId,
       name,
       email: primaryEmail ?? "",
+      role: "technician",
     });
-    return { kind: "technician" as const, id };
   },
 });
 
-/**
- * Removes a user (and any active jobs). Called on `user.deleted`.
- * Cleanups are conservative: completed jobs are left in place for audit,
- * scheduled jobs are deleted along with their notifications.
- */
+// Removes a user. Called on user.deleted. Historical jobs/notifications
+// are left in place for audit; a real product with stricter retention
+// would scrub or anonymise them here.
 export const deleteFromClerk = internalMutation({
   args: { clerkId: v.string() },
   returns: v.null(),
   handler: async (ctx, { clerkId }) => {
-    const manager = await ctx.db
-      .query("managers")
+    const user = await ctx.db
+      .query("users")
       .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
       .unique();
-    if (manager) {
-      await ctx.db.delete(manager._id);
-      return null;
-    }
-    const technician = await ctx.db
-      .query("technicians")
-      .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
-      .unique();
-    if (technician) {
-      await ctx.db.delete(technician._id);
+    if (user) {
+      await ctx.db.delete(user._id);
     }
     return null;
   },
 });
 
-// -----------------------------------------------------------------------
-// Admin operations (only callable from other Convex functions such as the
-// seed script, never directly from the client).
-// -----------------------------------------------------------------------
-
-/**
- * Returns the role + Convex `_id` of the user with the given Clerk ID,
- * or `null` if the webhook hasn't mirrored them yet. The seed script
- * polls this after creating a Clerk user so it knows when it's safe to
- * call follow-up internal mutations (promote, seed quotes, etc).
- *
- * Exposed as a public query but reveals only "does this Clerk subject
- * exist in our DB" — strictly less sensitive than what a holder of the
- * Clerk secret key can already see. We do NOT return name/email here,
- * to keep this strictly an existence-and-role probe.
- */
+// Existence-and-role probe by Clerk ID. The seed action polls this
+// after creating a Clerk user to know when the webhook has landed.
+// Returns less info than a holder of the Clerk secret can already see.
 export const byClerkId = query({
   args: { clerkId: v.string() },
   returns: v.union(
-    v.object({ kind: v.literal("manager"), id: v.id("managers") }),
-    v.object({ kind: v.literal("technician"), id: v.id("technicians") }),
+    v.object({
+      id: v.id("users"),
+      role: v.union(v.literal("manager"), v.literal("technician")),
+    }),
     v.null(),
   ),
   handler: async (ctx, { clerkId }) => {
-    const manager = await ctx.db
-      .query("managers")
+    const user = await ctx.db
+      .query("users")
       .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
       .unique();
-    if (manager) return { kind: "manager" as const, id: manager._id };
-    const technician = await ctx.db
-      .query("technicians")
-      .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
-      .unique();
-    if (technician) {
-      return { kind: "technician" as const, id: technician._id };
-    }
-    return null;
+    if (!user) return null;
+    return { id: user._id, role: user.role };
   },
 });
 
-/**
- * Promotes a technician row into the managers table. Used by the seed
- * script to designate test managers, and could be called from a future
- * admin UI. Internal so a malicious client cannot self-elevate.
- *
- * Idempotent: if a manager already exists for this clerkId we return
- * its id; if a technician exists, we move it; if neither, we throw.
- */
+// In-place role bump. Used by the seed script and could back a future
+// admin UI. Internal — clients can't self-elevate.
+//
+// Single-table win: an FK like `jobs.technicianId` keeps pointing at
+// the same row, so a tech-with-history promoted to manager carries
+// their entire history with them. No row migration, no orphaned refs.
 export const promoteToManager = internalMutation({
   args: { clerkId: v.string() },
-  returns: v.id("managers"),
-  handler: async (ctx, { clerkId }): Promise<Id<"managers">> => {
-    // Already promoted? No-op.
-    const existingManager: Doc<"managers"> | null = await ctx.db
-      .query("managers")
+  returns: v.id("users"),
+  handler: async (ctx, { clerkId }): Promise<Id<"users">> => {
+    const user: Doc<"users"> | null = await ctx.db
+      .query("users")
       .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
       .unique();
-    if (existingManager) return existingManager._id;
-
-    const tech: Doc<"technicians"> | null = await ctx.db
-      .query("technicians")
-      .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
-      .unique();
-    if (!tech) {
+    if (!user) {
       throw new ConvexError(
-        `No manager or technician found for Clerk ID ${clerkId}. ` +
+        `No user found for Clerk ID ${clerkId}. ` +
           `Has the user.created webhook fired yet?`,
       );
     }
-    const managerId = await ctx.db.insert("managers", {
-      tokenIdentifier: tech.tokenIdentifier,
-      clerkId: tech.clerkId,
-      name: tech.name,
-      email: tech.email,
-    });
-    await ctx.db.delete(tech._id);
-    return managerId;
+    if (user.role !== "manager") {
+      await ctx.db.patch(user._id, { role: "manager" });
+    }
+    return user._id;
   },
 });

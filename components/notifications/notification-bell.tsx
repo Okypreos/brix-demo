@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { Bell, CalendarPlus, CheckCircle2, RefreshCw } from "lucide-react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
@@ -19,23 +20,14 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/format/datetime";
 
-/**
- * Header bell that opens a popover with the latest notifications.
- *
- * - Subscribes to two reactive queries:
- *     - `notifications.unreadCountForCurrentUser` for the badge
- *     - `notifications.listForCurrentUser` for the popover body
- *   Convex's reactive query layer takes care of pushing updates the
- *   moment a job is assigned/rescheduled/completed anywhere in the app.
- *
- * - Clicking a row calls `markRead`. Optimistic UI isn't necessary —
- *   the reactive query will re-fire fast enough that the unread dot
- *   disappears within ~50ms of the mutation committing.
- *
- * - Renders nothing if the user is unauthenticated (the auth-gated
- *   queries would error). The parent layout is already auth-gated, so
- *   in practice this short-circuit is defensive.
- */
+// Header bell with a popover of recent notifications.
+//
+// Subscribes to `unreadCountForCurrentUser` (badge) and
+// `listForCurrentUser` (body). Convex pushes updates the moment a
+// job is assigned/rescheduled/completed anywhere — no polling.
+//
+// markRead doesn't need optimistic UI — the reactive query re-fires
+// within ~50ms of commit.
 
 type Notification = Doc<"notifications">;
 
@@ -63,6 +55,21 @@ export function NotificationBell() {
   const isLoading = unreadCount === undefined || notifications === undefined;
   const hasUnread = (unreadCount ?? 0) > 0;
   const displayCount = (unreadCount ?? 0) > 9 ? "9+" : String(unreadCount ?? 0);
+
+  // Re-mount <Bell> on each unread count *increase* so the single-shot
+  // CSS animation restarts (CSS animations don't replay on re-render).
+  // Skip the initial value — first paint triggers the animation
+  // natively. Only bump on subsequent increases (3 -> 4 etc).
+  const [shakeKey, setShakeKey] = useState(0);
+  const prevCountRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (unreadCount === undefined) return;
+    const prev = prevCountRef.current;
+    prevCountRef.current = unreadCount;
+    if (prev !== undefined && unreadCount > prev) {
+      setShakeKey((k) => k + 1);
+    }
+  }, [unreadCount]);
 
   async function onClickRow(notif: Notification) {
     if (notif.readAt !== undefined) return;
@@ -101,7 +108,15 @@ export function NotificationBell() {
           }
           className="relative"
         >
-          <Bell className="size-5" />
+          <Bell
+            // key={shakeKey} re-mounts to restart the animation.
+            // motion-safe respects prefers-reduced-motion.
+            key={shakeKey}
+            className={cn(
+              "size-5 origin-top",
+              hasUnread && "motion-safe:animate-bell-shake",
+            )}
+          />
           {hasUnread ? (
             <span
               aria-hidden
@@ -163,11 +178,9 @@ function NotificationRow({
   const meta = KIND_META[notification.kind];
   const Icon = meta.icon;
 
-  // The row is a `div` rather than a `button` so the interactive
-  // `<Checkbox>` (which is itself a button under the hood) can sit
-  // inside it without producing nested-interactive-element warnings.
-  // The text area is its own clickable button; the checkbox is a
-  // sibling and intercepts its own pointer events.
+  // div, not button — Checkbox is itself a button under the hood and
+  // we don't want nested-interactive-element warnings. Text area is
+  // its own button; checkbox is a sibling.
   return (
     <li>
       <div
@@ -203,12 +216,7 @@ function NotificationRow({
             {formatRelativeTime(notification._creationTime)}
           </span>
         </button>
-        {/*
-         * One-way mark-read checkbox. Disabled once `readAt` is set so
-         * the user can't toggle a notification back to unread (matches
-         * Gmail/Slack-style notification UX). We don't expose a
-         * `markUnread` mutation by design.
-         */}
+        {/* One-way: disabled once read. No markUnread by design. */}
         <Checkbox
           checked={!isUnread}
           disabled={!isUnread}

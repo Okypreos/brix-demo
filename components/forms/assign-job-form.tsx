@@ -42,12 +42,8 @@ import {
   type AssignJobFormValues,
 } from "@/lib/validators/assign-job";
 
-/**
- * Build the half-hour start-time options between `startHour` and
- * `endHour` (24-hour, inclusive of `startHour`, exclusive of `endHour`).
- * 06:00 -> 20:00 default gives 28 sensible business-hours options
- * without overwhelming the dropdown.
- */
+// Half-hour options between startHour and endHour (inclusive of start,
+// exclusive of end). 06:00 -> 20:00 gives 28 business-hours slots.
 function buildTimeOptions(startHour = 6, endHour = 20): string[] {
   const options: string[] = [];
   for (let h = startHour; h < endHour; h++) {
@@ -60,7 +56,7 @@ function buildTimeOptions(startHour = 6, endHour = 20): string[] {
   return options;
 }
 
-/** "08:30" -> "8:30am". Display-only formatter for the dropdown. */
+// "08:30" -> "8:30am". Display-only.
 function formatTimeOption(time: string) {
   const [hh, mm] = time.split(":");
   const hour = Number.parseInt(hh, 10);
@@ -71,30 +67,20 @@ function formatTimeOption(time: string) {
 
 const DURATION_OPTIONS = [0.5, 1, 1.5, 2, 3, 4, 6, 8] as const;
 
+// Snap up to the nearest dropdown option so the default matches a
+// real choice (5h estimate -> 6h shown).
 function defaultDuration(estimatedHours: number): number {
-  // Snap up to the nearest dropdown option so the seeded default
-  // matches a real choice; if estimatedHours is e.g. 5h we round up
-  // to 6 rather than displaying a non-selectable 5.
   const fromList = DURATION_OPTIONS.find((d) => d >= estimatedHours);
   return fromList ?? DURATION_OPTIONS[DURATION_OPTIONS.length - 1];
 }
 
 const TIME_OPTIONS = buildTimeOptions();
 
-/**
- * Picks the next available `(date, "HH:mm")` pair from `TIME_OPTIONS`.
- *
- * - If today still has a slot strictly later than `now + bufferMs`,
- *   return today + that slot.
- * - Otherwise (e.g. it's already 8pm), roll the date forward to
- *   tomorrow and default to the first slot of the day (06:00).
- *
- * The buffer is intentionally small (60s); the real safety net is the
- * 5-minute grace inside `validateWindow` server-side. The buffer just
- * keeps the *displayed* default visibly in the future so the user
- * doesn't open the dialog and immediately see a slot that's already
- * past.
- */
+// Next (date, "HH:mm") slot strictly after `now + bufferMs`. If today
+// is exhausted, rolls forward to tomorrow at 06:00.
+//
+// 60s buffer keeps the displayed default visibly in the future. The
+// real "no past start" check is server-side in validateWindow.
 function nextAvailableSlot(
   now: Date = new Date(),
   bufferMs = 60_000,
@@ -112,24 +98,17 @@ function nextAvailableSlot(
     }
   }
 
-  // No slot left today — roll forward to tomorrow at the first slot
-  // (06:00 by default; tracks `buildTimeOptions`'s start hour).
+  // No slot left today — roll forward to tomorrow's first slot.
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
   return { date: tomorrow, startTime: TIME_OPTIONS[0] };
 }
 
-/**
- * Schedule a Quote: pick a technician, a date, a start time, and a
- * duration. On submit, calls `jobs.assign` which atomically inserts
- * the job, flips the quote to scheduled, and notifies the technician
- * (with backend-enforced no-overlap via Convex's serializable OCC).
- *
- * Conflict UX: when the server throws OVERLAP we extract
- * `conflictStart` / `conflictEnd` from the error payload and surface a
- * targeted toast like "Conflict: Mon Apr 30, 2:00pm – 4:00pm". This
- * gives the user the exact window to dodge without a second round-trip.
- */
+// Schedule a quote: pick technician + date + start + duration. Submit
+// calls `jobs.assign` (atomic + serializable OCC, no double-booking).
+//
+// On OVERLAP we pull conflictStart/conflictEnd from the error payload
+// and toast the exact busy window so the user knows what to dodge.
 export function AssignJobForm({
   quote,
   onSuccess,
@@ -143,13 +122,8 @@ export function AssignJobForm({
   const technicians = useQuery(api.users.listTechnicians);
   const assign = useMutation(api.jobs.assign);
 
-  // Default to the next available business-hours slot so the form
-  // lands in a usable state without tripping the server's "no past
-  // start" guard. If today is exhausted (e.g. opened at 9pm), this
-  // rolls forward to tomorrow at 06:00. See `nextAvailableSlot`.
-  // We compute it once per dialog open per quote — `useMemo` keys on
-  // `quote.estimatedHours` keep the user's in-progress edits stable
-  // across re-renders.
+  // Default to the next business-hours slot so the form lands usable.
+  // useMemo keyed on estimatedHours so user edits survive re-renders.
   const defaults = useMemo<AssignJobFormValues>(() => {
     const { date, startTime } = nextAvailableSlot();
     return {
@@ -177,7 +151,7 @@ export function AssignJobForm({
       const end = start + values.durationHours * 60 * 60 * 1000;
       await assign({
         quoteId: quote._id,
-        technicianId: values.technicianId as Id<"technicians">,
+        technicianId: values.technicianId as Id<"users">,
         start,
         end,
       });
@@ -186,39 +160,30 @@ export function AssignJobForm({
       });
       onSuccess?.();
     } catch (err) {
-      if (err instanceof ConvexError) {
-        const data = err.data as
-          | {
-              code?: string;
-              message?: string;
-              conflictStart?: number;
-              conflictEnd?: number;
-            }
-          | string
-          | undefined;
-        if (typeof data === "object" && data?.code === "OVERLAP") {
-          const detail =
-            typeof data.conflictStart === "number" &&
-            typeof data.conflictEnd === "number"
-              ? formatJobWindow(data.conflictStart, data.conflictEnd)
-              : undefined;
-          toast.error("Time slot taken", {
-            description: detail
-              ? `${data.message ?? "Conflict"} · ${detail}`
-              : (data.message ?? "Pick another window."),
-          });
-          return;
-        }
-        const message =
-          typeof data === "string"
-            ? data
-            : (data?.message ?? "Could not schedule job.");
-        toast.error("Could not schedule job", { description: message });
+      if (!(err instanceof ConvexError)) {
+        console.error(err);
+        toast.error("Something went wrong", {
+          description: "Please try again in a moment.",
+        });
         return;
       }
-      console.error(err);
-      toast.error("Something went wrong", {
-        description: "Please try again in a moment.",
+
+      const data = err.data as {
+        code?: string;
+        message?: string;
+        conflictStart?: number;
+        conflictEnd?: number;
+      };
+
+      if (data.code === "OVERLAP" && data.conflictStart && data.conflictEnd) {
+        toast.error("Time slot taken", {
+          description: `${data.message} · ${formatJobWindow(data.conflictStart, data.conflictEnd)}`,
+        });
+        return;
+      }
+
+      toast.error("Could not schedule job", {
+        description: data.message ?? "Pick another window.",
       });
     }
   }
@@ -255,7 +220,7 @@ export function AssignJobForm({
                     <SelectValue placeholder="Pick a technician" />
                   </SelectTrigger>
                   <SelectContent>
-                    {technicians.map((t: Doc<"technicians">) => (
+                    {technicians.map((t: Doc<"users">) => (
                       <SelectItem key={t._id} value={t._id}>
                         {t.name}
                       </SelectItem>
@@ -297,10 +262,8 @@ export function AssignJobForm({
                       mode="single"
                       selected={field.value}
                       onSelect={(d) => d && field.onChange(d)}
-                      // Disable past days to keep the picker honest;
-                      // the server still re-checks. Comparing local
-                      // midnight handles the "today is still pickable"
-                      // case correctly.
+                      // Disable past days; server still re-checks.
+                      // Local midnight keeps "today" pickable.
                       disabled={(date) => {
                         const today = new Date();
                         today.setHours(0, 0, 0, 0);

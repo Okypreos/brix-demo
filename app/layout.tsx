@@ -19,7 +19,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Brix Scheduling",
+  title: "Demo Scheduling",
   description: "Assign jobs to technicians without overlaps.",
 };
 
@@ -29,12 +29,6 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    // ClerkProvider must wrap ConvexProviderWithClerk so Convex can read
-    // the Clerk session via useAuth(). See:
-    // https://docs.convex.dev/auth/clerk#nextjs
-    //
-    // afterSignOutUrl lives on the provider in @clerk/nextjs v7 — the
-    // per-component prop on <UserButton/> was removed.
     <ClerkProvider afterSignOutUrl="/">
       <ConvexClientProvider>
         <html

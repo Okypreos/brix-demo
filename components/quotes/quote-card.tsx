@@ -12,16 +12,9 @@ import { QuoteCardActions } from "./quote-card-actions";
 import type { Quote } from "@/lib/types";
 import { formatCreatedAgo } from "@/lib/format/time";
 
-/**
- * One quote rendered as a card. Designed for a sparse "5-10 quotes"
- * world: prefers air over density, surfaces customer + estimated time
- * up front because that's what a manager scans for.
- *
- * The interactive bits (assign / edit / delete) live in
- * `<QuoteCardActions>`, which is a separate client component so the
- * visual card stays cheap and only the action row pays the
- * client-component cost when dialog state changes.
- */
+// One quote as a card. Interactive bits live in <QuoteCardActions> so
+// the card itself stays a server component — only the action row
+// pays the client-component cost.
 export function QuoteCard({ quote }: { quote: Quote }) {
   return (
     <Card size="sm" className="flex flex-col gap-4">
@@ -63,8 +56,8 @@ export function QuoteCard({ quote }: { quote: Quote }) {
   );
 }
 
+// 1 -> "1 hour", 2.5 -> "2.5 hours", 0.5 -> "30 min".
 function formatHours(hours: number) {
-  // 1 -> "1 hour", 2.5 -> "2.5 hours", 0.5 -> "30 min".
   if (hours < 1) return `${hours * 60} min`;
   if (hours === 1) return "1 hour";
   return `${hours} hours`;

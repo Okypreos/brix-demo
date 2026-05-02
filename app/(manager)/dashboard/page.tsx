@@ -3,7 +3,6 @@ import { ArrowRight, ClipboardList, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
-  CardContent,
   CardDescription,
   CardFooter,
   CardHeader,
@@ -11,17 +10,8 @@ import {
 } from "@/components/ui/card";
 import { DashboardKpis } from "@/components/manager/dashboard-kpis";
 
-/**
- * Manager dashboard.
- *
- * For now this is a quick-glance landing page with KPIs and shortcut
- * cards. Once jobs and notifications exist (Steps 6-7) we'll expand it
- * with "Jobs today", "Recent notifications", and "Active technicians".
- *
- * The KPI strip is a Client Component so it's reactive — the moment a
- * quote is created from the New Quote sheet, the count updates without
- * a refresh.
- */
+// Manager dashboard. KPI strip + shortcut card. KPI strip is a client
+// component so the numbers tick reactively when a quote is created.
 export default function DashboardPage() {
   return (
     <div className="flex flex-col gap-8">
@@ -63,23 +53,6 @@ export default function DashboardPage() {
               </Link>
             </Button>
           </CardFooter>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="mt-0">Coming soon</CardTitle>
-            <CardDescription>
-              Job assignment, technician schedules, and live notifications go
-              here once their backend is wired up.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ul className="grid grid-cols-1 gap-1.5 text-sm text-muted-foreground">
-              <li>· Assign quotes to technicians (no overlap)</li>
-              <li>· Live calendar of every technician&apos;s week</li>
-              <li>· Notifications when jobs are completed</li>
-            </ul>
-          </CardContent>
         </Card>
       </div>
     </div>

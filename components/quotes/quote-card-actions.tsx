@@ -14,20 +14,12 @@ import { EditQuoteDialog } from "./edit-quote-dialog";
 import { DeleteQuoteDialog } from "./delete-quote-dialog";
 import type { Quote } from "@/lib/types";
 
-/**
- * Quote-card action row: a primary "Assign technician" button when the
- * quote is unscheduled, plus a kebab dropdown for Edit and Delete.
- *
- * Edit is allowed for unscheduled and scheduled quotes (the server
- * rejects edits to completed quotes). Delete is allowed only for
- * unscheduled quotes; the menu item is hidden otherwise so users
- * don't run into a confusing FORBIDDEN error.
- *
- * The three dialogs are kept as siblings (not nested under the
- * dropdown) so closing the dropdown menu doesn't unmount the dialog
- * mid-interaction. The dropdown calls `setX` to open a dialog, then
- * closes itself; the dialog stays open until dismissed.
- */
+// Card action row. Edit is hidden on completed; delete is hidden on
+// anything but unscheduled (matches server rules — keeps users from
+// hitting a confusing FORBIDDEN).
+//
+// Dialogs are siblings of the dropdown (not nested) so the dropdown
+// closing doesn't unmount the dialog mid-interaction.
 export function QuoteCardActions({ quote }: { quote: Quote }) {
   const [assignOpen, setAssignOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -45,8 +37,7 @@ export function QuoteCardActions({ quote }: { quote: Quote }) {
             Assign technician
           </Button>
         ) : (
-          // Reserve the same vertical space as the button so cards
-          // line up neatly across statuses.
+          // Reserve button height so cards line up across statuses.
           <div className="h-9" aria-hidden />
         )}
         <DropdownMenu>

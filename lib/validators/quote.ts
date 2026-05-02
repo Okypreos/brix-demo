@@ -1,12 +1,8 @@
 import { z } from "zod";
 
-/**
- * Client-side validation for the quote create/edit form.
- *
- * IMPORTANT: keep these constraints in sync with the manual validators
- * in `convex/quotes.ts` — the server is the security boundary, this is
- * just for instant feedback in the form UI.
- */
+// Client-side validation for the quote form. Keep in sync with the
+// validators in convex/quotes.ts — the server is the security
+// boundary, this is just for instant form feedback.
 export const quoteFormSchema = z.object({
   title: z
     .string()

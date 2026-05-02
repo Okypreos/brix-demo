@@ -2,33 +2,17 @@ import { UserButton } from "@clerk/nextjs";
 import { ManagerSidebar } from "./sidebar";
 import { NotificationsSlot } from "@/components/notifications/notifications-slot";
 import { AuthenticatedShell } from "@/components/layout/authenticated-shell";
-import type { CurrentManager } from "@/lib/auth/types";
+import type { User } from "@/lib/auth/types";
 
-/**
- * The visual frame for the manager workspace.
- *
- * Layout: a CSS grid with a fixed sidebar column and a flexible main
- * column. The sidebar is sticky so navigation stays put while pages
- * scroll.
- *
- * Client components composed in:
- *  - <ManagerSidebar/>     — uses usePathname for active highlighting.
- *  - <NotificationsSlot/>  — wraps the bell + toast bridge inside a
- *                            Convex `<Authenticated>` boundary so the
- *                            auth-gated `notifications.*` queries are
- *                            never called during the brief sign-out /
- *                            sign-in transition.
- *  - <AuthenticatedShell/> — same boundary, but for the page `children`.
- *                            Means *every* auth-gated `useQuery` on a
- *                            manager page is automatically suppressed
- *                            during the transient sign-out window — no
- *                            per-page wrapping required.
- */
+// Visual frame for the manager workspace. Sticky sidebar + scrolling
+// main. AuthenticatedShell wraps `children` so every auth-gated
+// useQuery on every manager page is suppressed during the sign-out
+// transition without per-page wrapping.
 export function ManagerShell({
   user,
   children,
 }: {
-  user: CurrentManager;
+  user: User;
   children: React.ReactNode;
 }) {
   return (

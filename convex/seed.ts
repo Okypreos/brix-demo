@@ -2,37 +2,15 @@ import { ConvexError, v } from "convex/values";
 import { internalMutation } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 
-/**
- * Demo data seeders.
- *
- * These are `internalMutation`s — invoked exclusively from the local
- * `scripts/seed.ts` orchestrator (which authenticates with the Convex
- * deploy key), never from the browser. They exist purely so the live
- * Vercel demo isn't a blank screen on first load.
- *
- * Design choices:
- *
- * 1. Idempotent. The script may run more than once (against the same
- *    Convex deployment) without producing duplicates. We dedupe quotes
- *    by `(managerId, title)` and jobs by `(quoteId)` since each demo
- *    quote is assigned to at most one job.
- *
- * 2. Skip the OCC overlap check. The production `jobs.assign` path
- *    deliberately rejects overlapping windows; the seed picks
- *    non-overlapping windows by construction (offsets are spaced
- *    apart per technician), so running the same overlap check here
- *    would be redundant. If a maintainer adds an offset that does
- *    overlap they'll see a clear `OVERLAP` error from `assign`
- *    instead — but here we want determinism.
- *
- * 3. No notifications written. Reviewers don't need a notification
- *    backlog from the seed; real assignments via the UI will emit
- *    them.
- */
-
-// -----------------------------------------------------------------------
-// Quotes
-// -----------------------------------------------------------------------
+// Demo data seeders. Internal mutations called from `seedAction.ts`,
+// never from the browser.
+//
+// Idempotent — safe to re-run. Quotes are deduped by (manager, title);
+// jobs are deduped by quoteId (one job per demo quote).
+//
+// We skip the OCC overlap check here since seed offsets are spaced apart
+// by construction. Notifications are also skipped — reviewers don't need
+// a backlog from the seed.
 
 const quoteInputValidator = v.object({
   title: v.string(),
@@ -42,11 +20,8 @@ const quoteInputValidator = v.object({
   estimatedHours: v.number(),
 });
 
-/**
- * Inserts a batch of quotes attributed to the manager identified by
- * `managerClerkId`. Quotes that already exist (matched by `title`
- * scoped to that manager) are left untouched.
- */
+// Inserts quotes attributed to the given manager. Existing quotes
+// (matched by title scoped to that manager) are left untouched.
 export const seedDemoQuotes = internalMutation({
   args: {
     managerClerkId: v.string(),
@@ -58,20 +33,18 @@ export const seedDemoQuotes = internalMutation({
     quoteIds: v.array(v.id("quotes")),
   }),
   handler: async (ctx, { managerClerkId, quotes }) => {
-    const manager: Doc<"managers"> | null = await ctx.db
-      .query("managers")
+    const manager: Doc<"users"> | null = await ctx.db
+      .query("users")
       .withIndex("by_clerk_id", (q) => q.eq("clerkId", managerClerkId))
       .unique();
-    if (!manager) {
+    if (!manager || manager.role !== "manager") {
       throw new ConvexError(
         `seedDemoQuotes: no manager with clerkId=${managerClerkId}. ` +
           `Run promoteToManager first.`,
       );
     }
 
-    // Single read of all this manager's quotes is cheaper than one
-    // query per input quote, and the dataset is bounded (the seed
-    // input is small).
+    // One read of all this manager's quotes is cheaper than per-quote.
     const existing = await ctx.db
       .query("quotes")
       .withIndex("by_manager", (q) =>
@@ -108,53 +81,42 @@ export const seedDemoQuotes = internalMutation({
   },
 });
 
-// -----------------------------------------------------------------------
-// Jobs
-// -----------------------------------------------------------------------
-
 const jobInputValidator = v.object({
-  /** Title of an already-seeded quote belonging to the manager. */
   quoteTitle: v.string(),
-  /** ClerkId of the technician to assign. */
   technicianClerkId: v.string(),
-  /** Window start, expressed as ms offset from `now` (negatives = past). */
+  // Window start as ms offset from `now` (negatives = past).
   startOffsetMs: v.number(),
-  /** Duration in ms. Must be > 0. */
   durationMs: v.number(),
-  /** If true, mark both the job and its quote as completed. */
+  // If true, mark both job and quote as completed.
   complete: v.optional(v.boolean()),
 });
 
-/**
- * Assigns previously-seeded quotes to technicians, optionally backdating
- * some so the demo dashboard shows a realistic mix of unscheduled,
- * scheduled, and completed work.
- *
- * Idempotent on `(quoteId)` — if a job already exists for that quote
- * we skip insertion. We do NOT update its status on re-runs (that
- * would clobber any state the demo user produced via the UI).
- */
+// Assigns previously-seeded quotes to technicians. Backdates some
+// (via negative offsets) so the dashboard shows a realistic mix of
+// unscheduled, scheduled, and completed work.
+//
+// Idempotent on quoteId. We don't update status on re-runs — that
+// would clobber state the demo user produced via the UI.
 export const seedDemoJobs = internalMutation({
   args: {
     managerClerkId: v.string(),
-    /** `Date.now()` captured by the script. Passing it in keeps this
-     * mutation deterministic across retries within a single seed run. */
+    // Captured by the caller and passed in so retries within a single
+    // seed run produce the same offsets.
     now: v.number(),
     jobs: v.array(jobInputValidator),
   },
   returns: v.object({ created: v.number(), skipped: v.number() }),
   handler: async (ctx, { managerClerkId, now, jobs }) => {
-    const manager: Doc<"managers"> | null = await ctx.db
-      .query("managers")
+    const manager: Doc<"users"> | null = await ctx.db
+      .query("users")
       .withIndex("by_clerk_id", (q) => q.eq("clerkId", managerClerkId))
       .unique();
-    if (!manager) {
+    if (!manager || manager.role !== "manager") {
       throw new ConvexError(
         `seedDemoJobs: no manager with clerkId=${managerClerkId}.`,
       );
     }
 
-    // Index manager's quotes by title for fast lookup.
     const quotes = await ctx.db
       .query("quotes")
       .withIndex("by_manager", (q) =>
@@ -175,19 +137,18 @@ export const seedDemoJobs = internalMutation({
         );
       }
 
-      const tech: Doc<"technicians"> | null = await ctx.db
-        .query("technicians")
+      const tech: Doc<"users"> | null = await ctx.db
+        .query("users")
         .withIndex("by_clerk_id", (q) =>
           q.eq("clerkId", input.technicianClerkId),
         )
         .unique();
-      if (!tech) {
+      if (!tech || tech.role !== "technician") {
         throw new ConvexError(
           `seedDemoJobs: no technician with clerkId=${input.technicianClerkId}.`,
         );
       }
 
-      // Already seeded a job for this quote? Skip.
       const existing = await ctx.db
         .query("jobs")
         .withIndex("by_quoteId", (q) => q.eq("quoteId", quote._id))

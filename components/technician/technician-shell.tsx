@@ -2,27 +2,16 @@ import { UserButton } from "@clerk/nextjs";
 import { TechnicianSidebar } from "./sidebar";
 import { NotificationsSlot } from "@/components/notifications/notifications-slot";
 import { AuthenticatedShell } from "@/components/layout/authenticated-shell";
-import type { CurrentTechnician } from "@/lib/auth/types";
+import type { User } from "@/lib/auth/types";
 
-/**
- * The visual frame for the technician workspace. Mirrors `ManagerShell`
- * intentionally — same header layout, same sidebar grid — so the two
- * roles feel like one product, just with different nav and content.
- *
- * Auth boundaries:
- *  - `<NotificationsSlot/>` (header) wraps its own bell + toast bridge
- *    in `<Authenticated>` so the bell never fires unauthenticated
- *    queries during the sign-out transition.
- *  - `<AuthenticatedShell/>` wraps `children` (the page `<main>`
- *    content) in the same boundary, so every auth-gated `useQuery`
- *    on a technician page is automatically suppressed during the
- *    transient sign-out / sign-in window.
- */
+// Visual frame for the technician workspace. Mirrors ManagerShell so
+// both roles feel like one product. AuthenticatedShell wraps children
+// to suppress auth-gated useQuery calls during sign-out transitions.
 export function TechnicianShell({
   user,
   children,
 }: {
-  user: CurrentTechnician;
+  user: User;
   children: React.ReactNode;
 }) {
   return (

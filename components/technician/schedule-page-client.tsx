@@ -9,27 +9,13 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { JobDetailDialog, type JobDetail } from "./job-detail-dialog";
 
-/**
- * `react-big-calendar` (plus its localizer chain and ~18KB of CSS) is
- * the single heaviest module in this project. Statically importing it
- * here would pull the entire library into the initial dev module
- * graph, making cold `npm run dev` and the first compile of unrelated
- * pages much slower (Turbopack + Tailwind v4 PostCSS have to digest
- * the full vendor stylesheet up front).
- *
- * `next/dynamic` with `ssr: false` defers compilation and download
- * until a user actually visits the schedule page. Other pages
- * (manager dashboard, quotes) never pay for the calendar bundle, and
- * cold dev startup is dramatically lighter. The skeleton fallback
- * matches the calendar's hydrated height so layout doesn't shift
- * once the chunk loads.
- *
- * `ssr: false` is correct here because react-big-calendar's
- * imperative DOM measurements assume a real browser; it doesn't
- * render anything useful on the server anyway.
- *
- * See https://nextjs.org/docs/app/guides/lazy-loading
- */
+// react-big-calendar is the heaviest module in the project.
+// next/dynamic + ssr:false keeps it out of the initial bundle for
+// every other page. The skeleton matches the hydrated height so
+// layout doesn't shift on load.
+//
+// ssr:false is the right call — rbc's imperative DOM measurements
+// assume a browser. https://nextjs.org/docs/app/guides/lazy-loading
 const ScheduleCalendar = dynamic(
   () => import("./schedule-calendar").then((m) => m.ScheduleCalendar),
   {
@@ -38,24 +24,26 @@ const ScheduleCalendar = dynamic(
   },
 );
 
-/**
- * Client wrapper that owns the "selected job" state and bridges the
- * calendar event onClick to the detail dialog.
- *
- * We re-run the same `listWithQuotes` query the calendar uses — Convex
- * dedupes identical subscriptions, so this isn't a duplicate read.
- * The benefit is the dialog always sees the latest hydrated row for
- * the selected job (including a status flip after Mark Complete).
- */
-export function SchedulePageClient() {
+// Owns "selected job" state and bridges the calendar onClick to the
+// detail dialog. Re-runs the same listWithQuotes query as the
+// calendar — Convex dedupes identical subscriptions, so it's not a
+// duplicate read, and the dialog sees fresh data after Mark Complete.
+//
+// `technicianId` + `readOnly` let the manager-side
+// /technicians/[id] page reuse this same wrapper.
+export function SchedulePageClient({
+  technicianId,
+  readOnly = false,
+}: {
+  technicianId?: Id<"users">;
+  readOnly?: boolean;
+} = {}) {
   const [selectedJobId, setSelectedJobId] = useState<Id<"jobs"> | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  // We pass no range here so the lookup hits the same cache as the
-  // calendar's current window. A second-precision dedupe would
-  // require sharing the date state; for the small extra cost of an
-  // unbounded fetch we get a much simpler component contract.
-  const allJobs = useQuery(api.jobs.listWithQuotes, {});
+  // No range here so we hit the same cache as the calendar's current
+  // window. Slight over-fetch buys a much simpler contract.
+  const allJobs = useQuery(api.jobs.listWithQuotes, { technicianId });
 
   const jobsById = useMemo(() => {
     const map = new Map<Id<"jobs">, JobDetail>();
@@ -83,10 +71,9 @@ export function SchedulePageClient() {
 
   function handleOpenChange(next: boolean) {
     setDialogOpen(next);
-    // Hold onto the id while the dialog animates closed so the
-    // contents don't blank out mid-transition. When fully closed,
-    // null it out so the next open doesn't briefly flash the old
-    // job's data.
+    // Keep the id while the dialog animates closed so contents don't
+    // blank out mid-transition. Then null it out so the next open
+    // doesn't flash stale data.
     if (!next) {
       setTimeout(() => setSelectedJobId(null), 200);
     }
@@ -94,11 +81,15 @@ export function SchedulePageClient() {
 
   return (
     <>
-      <ScheduleCalendar onSelectJob={handleSelect} />
+      <ScheduleCalendar
+        onSelectJob={handleSelect}
+        technicianId={technicianId}
+      />
       <JobDetailDialog
         job={selectedJob}
         open={dialogOpen}
         onOpenChange={handleOpenChange}
+        readOnly={readOnly}
       />
     </>
   );

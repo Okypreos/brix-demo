@@ -10,11 +10,8 @@ import {
 import { AssignJobForm } from "@/components/forms/assign-job-form";
 import type { Quote } from "@/lib/types";
 
-/**
- * Modal dialog hosting the assign-job form. Open state is controlled
- * by the parent so the trigger (e.g. a Button on the card) can sit in
- * its own component.
- */
+// Modal wrapper for the assign-job form. Controlled open state so the
+// trigger can live in its own component.
 export function AssignQuoteDialog({
   quote,
   open,

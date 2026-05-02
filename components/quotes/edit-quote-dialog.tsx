@@ -10,11 +10,8 @@ import {
 import { QuoteForm } from "@/components/forms/quote-form";
 import type { Quote } from "@/lib/types";
 
-/**
- * Modal wrapper around `<QuoteForm>` in edit mode. The form itself
- * already pre-fills its defaults from the quote and routes submissions
- * through `quotes.update`, so this component is purely presentational.
- */
+// Modal wrapper around <QuoteForm> in edit mode. The form pre-fills
+// from `quote` and routes submits through `quotes.update`.
 export function EditQuoteDialog({
   quote,
   open,

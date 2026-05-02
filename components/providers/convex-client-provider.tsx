@@ -11,13 +11,9 @@ if (!process.env.NEXT_PUBLIC_CONVEX_URL) {
 
 const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL);
 
-/**
- * Client-side provider chain for Convex + Clerk.
- *
- * The user mirror from Clerk into our Convex `managers` / `technicians`
- * tables happens server-side via a Clerk webhook (see `convex/http.ts`),
- * so there is no client-side bootstrap effect to mount here.
- */
+// Client provider chain for Convex + Clerk. User mirroring happens
+// server-side via the Clerk webhook (see convex/http.ts), so there's
+// no bootstrap effect to mount here.
 export function ConvexClientProvider({ children }: { children: ReactNode }) {
   return (
     <ConvexProviderWithClerk client={convex} useAuth={useAuth}>

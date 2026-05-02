@@ -24,24 +24,13 @@ const TABS = [
 
 type TabValue = (typeof TABS)[number]["value"];
 
-/**
- * Interactive part of the manager quotes page.
- *
- * - The four tabs (All / Unscheduled / Scheduled / Completed) drive
- *   the `status` arg on `api.quotes.list` — Convex pushes a fresh page
- *   without us refetching anything.
- * - "New quote" opens a slide-over (<Sheet>) containing the form.
- *   We support deep-linking via `?new=1` so the dashboard's "New quote"
- *   shortcut can pre-open the sheet on navigation.
- *
- * The sheet's open state is derived from two truths combined with `||`:
- * - `wantsNew`: the URL param (read reactively from `useSearchParams`)
- * - `localOpen`: the in-page open state for the toolbar button
- *
- * Deriving in render rather than syncing in an effect avoids the
- * cascading-render anti-pattern (react-hooks/set-state-in-effect) and
- * keeps the URL as the source of truth for deep links.
- */
+// Quotes page interactive shell. Tabs drive the `status` arg on
+// `quotes.list`. "New quote" opens a slide-over; ?new=1 deep-links to
+// the same sheet from the dashboard shortcut.
+//
+// sheetOpen = localOpen || wantsNew. Deriving (instead of syncing in
+// an effect) avoids the cascading-render anti-pattern and keeps the
+// URL as source of truth for deep links.
 export function QuotesPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -57,9 +46,8 @@ export function QuotesPageClient() {
       setLocalOpen(true);
       return;
     }
-    // Closing has to clear *both* truths: drop the local flag, and if
-    // the URL is what's holding the sheet open, strip `?new=1` so the
-    // next render observes a closed state.
+    // Closing has to clear both truths — drop the local flag and
+    // strip ?new=1 if the URL was what held the sheet open.
     setLocalOpen(false);
     if (wantsNew) {
       router.replace("/quotes", { scroll: false });

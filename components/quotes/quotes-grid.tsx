@@ -7,14 +7,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { QuoteCard } from "./quote-card";
 import type { Quote, QuoteStatus } from "@/lib/types";
 
-/**
- * Reactive grid of quote cards.
- *
- * `status` filters server-side via the `by_status` index. When
- * undefined, all statuses are shown (newest first, capped at 100).
- * Loading state shows skeleton cards so the page doesn't jump when
- * Convex hydrates.
- */
+// Reactive grid of quote cards. `status` filters server-side via the
+// by_status index; undefined shows all (newest first, capped at 100).
 export function QuotesGrid({
   status,
   emptyMessage,

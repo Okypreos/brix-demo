@@ -2,20 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ClipboardList, LayoutDashboard } from "lucide-react";
+import { ClipboardList, LayoutDashboard, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-/**
- * Static nav config. Add new sections here; the sidebar will pick them
- * up automatically. `match` controls active highlighting:
- *  - "exact"  -> highlights only on the exact URL
- *  - "prefix" -> highlights on any descendant route (so /quotes/[id]
- *                still highlights "Quotes")
- *
- * Only routes that actually exist are listed here. Adding a link for
- * a route that doesn't have an `app/(manager)/<segment>/page.tsx` will
- * show a 404 to the user — better to grow the nav as the routes land.
- */
+// Add new sections here; sidebar picks them up automatically.
+// match: "exact" = only that URL, "prefix" = also matches descendants
+// (so /quotes/[id] still highlights "Quotes").
 const NAV: Array<{
   href: string;
   label: string;
@@ -24,6 +16,7 @@ const NAV: Array<{
 }> = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, match: "exact" },
   { href: "/quotes", label: "Quotes", icon: ClipboardList, match: "prefix" },
+  { href: "/technicians", label: "Technicians", icon: Users, match: "prefix" },
 ];
 
 export function ManagerSidebar() {
@@ -68,7 +61,7 @@ export function ManagerSidebar() {
         })}
       </nav>
       <div className="px-6 py-4 text-xs text-muted-foreground border-t border-border">
-        Brix Scheduling
+        Demo Scheduling
       </div>
     </aside>
   );

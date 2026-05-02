@@ -4,79 +4,37 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { requireManager, requireTechnician, getCurrentUser } from "./lib/auth";
 import { overlaps } from "./lib/intervals";
 
-/**
- * Jobs are the assignment of a Quote to a Technician for a specific
- * time window [start, end). This module is the heart of the project:
- * `assign` and `reschedule` enforce **backend conflict prevention** so
- * a technician can never end up with two overlapping jobs, even under
- * concurrent assignments by multiple managers.
- *
- * The mechanism is Convex's serializable optimistic concurrency control
- * (OCC). Each mutation is a deterministic transaction; Convex tracks
- * the read set automatically and either commits the writes atomically
- * or aborts and retries the entire function. Because we narrow the
- * overlap query with the `by_technicianId_and_start` index, two assigns
- * to *different* technicians never touch each other's read sets and
- * commit in parallel. Two assigns to the same technician with
- * non-overlapping windows also commit in parallel (different index
- * keys). Two assigns to the same technician with overlapping windows
- * collide — one wins, the loser retries, observes the winner in its
- * read set, and throws a deterministic OVERLAP error. No locks, no
- * SQL exclusion constraints, no application-layer queue.
- *
- * See the "predicate locking" pattern in
- * https://stack.convex.dev/high-throughput-mutations-via-precise-queries
- * for the technique used here.
- */
+// Jobs assign a Quote to a Technician for a window [start, end).
+// `assign` and `reschedule` enforce no-overlap on the same technician
+// using Convex's serializable OCC: concurrent overlapping writes
+// collide, the loser retries, sees the winner, throws OVERLAP.
+// The `by_technicianId_and_start` index narrows the read set so
+// assigns to different technicians don't contend.
 
-// -----------------------------------------------------------------------
-// Constants and validators
-// -----------------------------------------------------------------------
-
-/** Hard ceiling on a single job's duration. Beyond a working day a
- * window almost certainly indicates a misclick or off-by-1000-units
- * error in the client-side date math. The validator catches it. */
 const MAX_DURATION_MS = 24 * 60 * 60 * 1000;
-const MIN_DURATION_MS = 30 * 60 * 1000; // 30 minutes
-
-/** Grace window for "start in the past" rejection. Any value within
- * five minutes of `Date.now()` on the server is allowed, to absorb
- * client-server clock skew and the brief delay between the form
- * submission and the mutation actually executing. */
+const MIN_DURATION_MS = 30 * 60 * 1000;
+// Grace for clock skew + the gap between submit and execute.
 const PAST_START_GRACE_MS = 5 * 60 * 1000;
 
 const jobValidator = v.object({
   _id: v.id("jobs"),
   _creationTime: v.number(),
   quoteId: v.id("quotes"),
-  technicianId: v.id("technicians"),
-  managerId: v.id("managers"),
+  technicianId: v.id("users"),
+  managerId: v.id("users"),
   start: v.number(),
   end: v.number(),
   status: v.union(v.literal("scheduled"), v.literal("completed")),
   completedAt: v.optional(v.number()),
 });
 
-// -----------------------------------------------------------------------
-// Internal helpers
-// -----------------------------------------------------------------------
-
-/**
- * Validates an [start, end) window against the project's invariants.
- *
- * - end > start
- * - duration in [30 min, 24 h]
- * - start not too far in the past (clock skew grace)
- *
- * Returns nothing on success, throws ConvexError on failure. Errors
- * are typed via a `code` field so the client can pattern-match them.
- */
-function validateWindow(start: number, end: number, options: {
-  // When rescheduling we sometimes legitimately move a job into the
-  // past (e.g. recording work that already happened). We still want
-  // most callers to enforce the "no past start" rule.
-  allowPast?: boolean;
-} = {}) {
+// Validates [start, end). Throws ConvexError with a `code` so the
+// client can pattern-match.
+function validateWindow(
+  start: number,
+  end: number,
+  options: { allowPast?: boolean } = {},
+) {
   if (!Number.isFinite(start) || !Number.isFinite(end)) {
     throw new ConvexError({
       code: "INVALID_WINDOW",
@@ -110,26 +68,14 @@ function validateWindow(start: number, end: number, options: {
   }
 }
 
-/**
- * Looks for an existing scheduled job on `technicianId` that overlaps
- * `[newStart, newEnd)`. Returns the conflicting job if there is one.
- *
- * Implementation note — narrowing the read set:
- *   `q.eq("technicianId", x).lt("start", newEnd)` reads only this
- *   technician's jobs that *start before our proposed window ends*.
- *   That set is a strict superset of all possible overlappers (a job
- *   starting at or after `newEnd` cannot overlap), and it is the
- *   smallest set we can express purely through the index — we still
- *   have to filter by `end > newStart` in JS because indexes can't
- *   express that condition with a fixed `start` upper bound. The set
- *   is small in practice and the OCC read set is bounded to it.
- *
- * The optional `excludeJobId` is for `reschedule` so a job doesn't
- * conflict with its own pre-update self.
- */
+// Returns a scheduled job on `technicianId` overlapping [newStart, newEnd),
+// or null. `excludeJobId` lets reschedule skip the moving job.
+//
+// The `lt("start", newEnd)` predicate is the tightest the index can
+// express; we filter the lower bound in JS.
 async function findOverlappingJob(
   ctx: MutationCtx,
-  technicianId: Id<"technicians">,
+  technicianId: Id<"users">,
   newStart: number,
   newEnd: number,
   excludeJobId?: Id<"jobs">,
@@ -143,9 +89,7 @@ async function findOverlappingJob(
 
   for (const job of candidates) {
     if (job._id === excludeJobId) continue;
-    // Completed jobs are historical record; they don't block new
-    // bookings. The schema only has scheduled/completed, so this
-    // check is the right "is this slot held?" predicate.
+    // Completed jobs are history; they don't block new bookings.
     if (job.status !== "scheduled") continue;
     if (overlaps(job.start, job.end, newStart, newEnd)) {
       return job;
@@ -154,33 +98,18 @@ async function findOverlappingJob(
   return null;
 }
 
-// -----------------------------------------------------------------------
-// Mutations
-// -----------------------------------------------------------------------
-
-/**
- * Assigns an unscheduled quote to a technician for a specific window.
- *
- * Atomic: either all four writes succeed together, or none do.
- *  1. insert the new `jobs` row
- *  2. patch the quote to `status: "scheduled"`
- *  3. insert a `notifications` row for the technician
- *
- * Errors a manager UI should pattern-match on the `code` field of the
- * thrown ConvexError:
- *  - "OVERLAP"        -> another job is in this slot. Render the
- *                        conflicting window so the user knows what to
- *                        change. Payload: { conflictId, conflictStart,
- *                        conflictEnd }.
- *  - "QUOTE_UNAVAILABLE" -> the quote was already scheduled or
- *                           completed (race with another manager).
- *  - "INVALID_WINDOW" -> bad input (end<=start, > 24h, in the past, …)
- *  - "FORBIDDEN"      -> caller is not a manager.
- */
+// Assigns an unscheduled quote to a technician. Atomic: insert job,
+// patch quote to scheduled, write notification.
+//
+// Errors clients should pattern-match on:
+//   OVERLAP            — slot taken; payload has conflictId/Start/End.
+//   QUOTE_UNAVAILABLE  — already scheduled by another manager.
+//   INVALID_WINDOW     — bad input.
+//   FORBIDDEN          — caller is not a manager.
 export const assign = mutation({
   args: {
     quoteId: v.id("quotes"),
-    technicianId: v.id("technicians"),
+    technicianId: v.id("users"),
     start: v.number(),
     end: v.number(),
   },
@@ -191,10 +120,7 @@ export const assign = mutation({
 
     const quote = await ctx.db.get(quoteId);
     if (!quote) {
-      throw new ConvexError({
-        code: "NOT_FOUND",
-        message: "Quote not found.",
-      });
+      throw new ConvexError({ code: "NOT_FOUND", message: "Quote not found." });
     }
     if (quote.status !== "unscheduled") {
       throw new ConvexError({
@@ -204,8 +130,10 @@ export const assign = mutation({
       });
     }
 
+    // Single users table => any Id<"users"> could be a manager. Reject
+    // anything that isn't actually a technician.
     const technician = await ctx.db.get(technicianId);
-    if (!technician) {
+    if (!technician || technician.role !== "technician") {
       throw new ConvexError({
         code: "NOT_FOUND",
         message: "Technician not found.",
@@ -217,8 +145,6 @@ export const assign = mutation({
       throw new ConvexError({
         code: "OVERLAP",
         message: `${technician.name} already has a job during that time.`,
-        // The client uses these to render an informative toast like
-        // "Conflict at 2:00pm – 4:00pm" without an extra round-trip.
         conflictId: conflict._id,
         conflictStart: conflict.start,
         conflictEnd: conflict.end,
@@ -237,7 +163,6 @@ export const assign = mutation({
     await ctx.db.patch(quoteId, { status: "scheduled" });
 
     await ctx.db.insert("notifications", {
-      recipientKind: "technician",
       recipientId: technicianId,
       kind: "job_assigned",
       jobId,
@@ -248,13 +173,8 @@ export const assign = mutation({
   },
 });
 
-/**
- * Moves an existing scheduled job to a new window. Same overlap guard
- * as `assign`, but excludes the job being moved from the search so it
- * doesn't conflict with its own pre-update times.
- *
- * Refuses to reschedule a completed job — those are immutable record.
- */
+// Moves a scheduled job. Same overlap guard as `assign`, excluding the
+// job being moved. Completed jobs are immutable record.
 export const reschedule = mutation({
   args: {
     jobId: v.id("jobs"),
@@ -268,10 +188,7 @@ export const reschedule = mutation({
 
     const job = await ctx.db.get(jobId);
     if (!job) {
-      throw new ConvexError({
-        code: "NOT_FOUND",
-        message: "Job not found.",
-      });
+      throw new ConvexError({ code: "NOT_FOUND", message: "Job not found." });
     }
     if (job.status === "completed") {
       throw new ConvexError({
@@ -302,7 +219,6 @@ export const reschedule = mutation({
 
     const quote = await ctx.db.get(job.quoteId);
     await ctx.db.insert("notifications", {
-      recipientKind: "technician",
       recipientId: job.technicianId,
       kind: "job_updated",
       jobId,
@@ -312,18 +228,9 @@ export const reschedule = mutation({
   },
 });
 
-/**
- * Marks a job complete. Only the assigned technician (or — debatable —
- * the manager who created it) is allowed to do this. We keep it strict:
- * technicians complete their own jobs, full stop. A future "manager
- * cancels job" flow will be a separate mutation with different
- * semantics (notification of cancellation, possibly quote -> unscheduled).
- *
- * Atomic:
- *  - patch the job to completed (+ completedAt)
- *  - patch the quote to completed
- *  - notify the manager who scheduled it
- */
+// Marks a job complete. Only the assigned technician can do this.
+// Patches job + quote to completed and notifies the manager.
+// Idempotent on already-completed jobs.
 export const complete = mutation({
   args: { jobId: v.id("jobs") },
   returns: v.null(),
@@ -332,10 +239,7 @@ export const complete = mutation({
 
     const job = await ctx.db.get(jobId);
     if (!job) {
-      throw new ConvexError({
-        code: "NOT_FOUND",
-        message: "Job not found.",
-      });
+      throw new ConvexError({ code: "NOT_FOUND", message: "Job not found." });
     }
     if (job.technicianId !== technician._id) {
       throw new ConvexError({
@@ -343,10 +247,7 @@ export const complete = mutation({
         message: "You can only complete jobs assigned to you.",
       });
     }
-    if (job.status === "completed") {
-      // Idempotent — a double-tap on "Mark complete" shouldn't error.
-      return null;
-    }
+    if (job.status === "completed") return null;
 
     const completedAt = Date.now();
     await ctx.db.patch(jobId, { status: "completed", completedAt });
@@ -354,7 +255,6 @@ export const complete = mutation({
 
     const quote = await ctx.db.get(job.quoteId);
     await ctx.db.insert("notifications", {
-      recipientKind: "manager",
       recipientId: job.managerId,
       kind: "job_completed",
       jobId,
@@ -364,26 +264,12 @@ export const complete = mutation({
   },
 });
 
-// -----------------------------------------------------------------------
-// Queries
-// -----------------------------------------------------------------------
-
-/**
- * Lists jobs for one technician within an optional time window.
- *
- * Auth model:
- *  - A technician can list their *own* jobs. `technicianId` is ignored
- *    — we always use the caller's id.
- *  - A manager can list any technician's jobs by passing `technicianId`.
- *
- * The `range` is half-open [start, end), matching the job intervals.
- * Without it, we return all the technician's jobs (capped at 200) so a
- * naive caller doesn't hit pagination. The calendar page in Step 8
- * passes a precise week range.
- */
+// Lists jobs for one technician within an optional time window.
+// Technicians always see their own; managers can pass `technicianId`.
+// Returns at most 200 rows.
 export const listForTechnician = query({
   args: {
-    technicianId: v.optional(v.id("technicians")),
+    technicianId: v.optional(v.id("users")),
     rangeStart: v.optional(v.number()),
     rangeEnd: v.optional(v.number()),
   },
@@ -397,11 +283,9 @@ export const listForTechnician = query({
       });
     }
 
-    let targetId: Id<"technicians">;
-    if (me.kind === "technician") {
-      // Technicians can only see their own schedule, even if they
-      // happen to know another tech's id.
-      targetId = me.doc._id;
+    let targetId: Id<"users">;
+    if (me.role === "technician") {
+      targetId = me._id;
     } else {
       if (!technicianId) {
         throw new ConvexError({
@@ -412,9 +296,6 @@ export const listForTechnician = query({
       targetId = technicianId;
     }
 
-    // Use the index for an efficient by-tech-by-start scan. The
-    // `lt("start", rangeEnd)` predicate narrows the read set further
-    // when a range is supplied.
     const results = await ctx.db
       .query("jobs")
       .withIndex("by_technicianId_and_start", (q) => {
@@ -425,37 +306,24 @@ export const listForTechnician = query({
       .take(200);
 
     if (rangeStart !== undefined) {
-      // Filter the lower bound in JS — same reasoning as in
-      // findOverlappingJob: the index can express one bound on a
-      // single field at a time.
+      // Lower bound has to be filtered in JS (index can only express
+      // one bound at a time).
       return results.filter((job) => job.end > rangeStart);
     }
     return results;
   },
 });
 
-/**
- * Like `listForTechnician`, but eagerly joins each job with its
- * underlying quote so the calendar can label events without a second
- * round-trip. Returns the canonical job fields plus a small denormal-
- * ised `quote` block (title, customerName, customerAddress).
- *
- * Why a separate query rather than extending `listForTechnician`?
- *   - Some callers (e.g. headless scripts, future mobile clients)
- *     don't need the join and would pay an extra read per job.
- *   - The reactive subscription includes the quotes in its read set,
- *     so a quote being renamed mid-day instantly updates the
- *     calendar event title — exactly what we want for this caller,
- *     overhead we don't want for others.
- *
- * Auth model is identical to `listForTechnician`.
- */
+// Same as `listForTechnician` but joins each job with its quote so the
+// calendar can render titles without a second round-trip. Including
+// quotes in the read set means a quote rename instantly updates open
+// calendar events too.
 const jobWithQuoteValidator = v.object({
   _id: v.id("jobs"),
   _creationTime: v.number(),
   quoteId: v.id("quotes"),
-  technicianId: v.id("technicians"),
-  managerId: v.id("managers"),
+  technicianId: v.id("users"),
+  managerId: v.id("users"),
   start: v.number(),
   end: v.number(),
   status: v.union(v.literal("scheduled"), v.literal("completed")),
@@ -470,7 +338,7 @@ const jobWithQuoteValidator = v.object({
 
 export const listWithQuotes = query({
   args: {
-    technicianId: v.optional(v.id("technicians")),
+    technicianId: v.optional(v.id("users")),
     rangeStart: v.optional(v.number()),
     rangeEnd: v.optional(v.number()),
   },
@@ -484,9 +352,9 @@ export const listWithQuotes = query({
       });
     }
 
-    let targetId: Id<"technicians">;
-    if (me.kind === "technician") {
-      targetId = me.doc._id;
+    let targetId: Id<"users">;
+    if (me.role === "technician") {
+      targetId = me._id;
     } else {
       if (!technicianId) {
         throw new ConvexError({
@@ -511,20 +379,12 @@ export const listWithQuotes = query({
         ? jobs.filter((j) => j.end > rangeStart)
         : jobs;
 
-    // Batch-load the quotes for all jobs we're returning. We could
-    // also `Promise.all(filtered.map(...))` but a sequential loop is
-    // negligibly slower for typical sizes (≤ 200) and keeps the read
-    // set order deterministic, which makes Convex's reactive cache
-    // behaviour easier to reason about.
     const out = [];
     for (const job of filtered) {
       const quote = await ctx.db.get(job.quoteId);
-      if (!quote) {
-        // Defensive: a job without its quote is a corruption. Skip
-        // rather than throw so a single bad row doesn't blank the
-        // technician's calendar.
-        continue;
-      }
+      // A job without its quote means data corruption. Skip rather
+      // than throw so one bad row doesn't blank the whole calendar.
+      if (!quote) continue;
       out.push({
         ...job,
         quote: {
@@ -539,13 +399,8 @@ export const listWithQuotes = query({
   },
 });
 
-/**
- * Lists every job in a date range across all technicians. Manager-only
- * — this drives the cross-tech calendar view (Step 8). For now it's
- * implemented with `_creationTime` desc + an in-memory range filter,
- * which is fine for the demo's volume. Add a `by_start` index later
- * if needed.
- */
+// All jobs in a date range across every technician. Manager-only.
+// Capped at 500 with an in-memory range filter; fine for demo volume.
 export const listForManager = query({
   args: {
     rangeStart: v.optional(v.number()),
@@ -563,11 +418,7 @@ export const listForManager = query({
   },
 });
 
-/**
- * Fetches a single job. Authorization: any signed-in user, but only
- * the assigned technician or any manager can see it. (Privacy: another
- * technician shouldn't see Bob's jobs by guessing an id.)
- */
+// Single job by id. Technicians can only see their own; managers see all.
 export const getById = query({
   args: { id: v.id("jobs") },
   returns: v.union(jobValidator, v.null()),
@@ -576,7 +427,7 @@ export const getById = query({
     if (!me) return null;
     const job = await ctx.db.get(id);
     if (!job) return null;
-    if (me.kind === "technician" && job.technicianId !== me.doc._id) {
+    if (me.role === "technician" && job.technicianId !== me._id) {
       return null;
     }
     return job;

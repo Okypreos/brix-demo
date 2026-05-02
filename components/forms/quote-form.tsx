@@ -21,19 +21,10 @@ import { api } from "@/convex/_generated/api";
 import type { Quote } from "@/lib/types";
 import { quoteFormSchema, type QuoteFormValues } from "@/lib/validators/quote";
 
-/**
- * Reusable create-or-edit quote form.
- *
- * - State is owned by react-hook-form; zod validates on submit and
- *   blur via the resolver. The shadcn `<Field>` API renders inline
- *   error messages without us having to wire each one up by hand.
- * - The `mode` prop discriminates between creating a new quote and
- *   editing an existing one. Edit mode pre-fills `defaultValues` from
- *   the supplied quote and routes the submit through `quotes.update`
- *   instead of `quotes.create`.
- * - On submit we call the Convex mutation directly and surface any
- *   `ConvexError`s as Sonner toasts.
- */
+// Reusable create-or-edit quote form. RHF + zod via the resolver;
+// shadcn <Field> renders inline errors. The `mode` prop picks
+// between `quotes.create` and `quotes.update`. ConvexErrors surface
+// as Sonner toasts.
 type QuoteFormMode =
   | { kind: "create" }
   | { kind: "edit"; quote: Quote };
@@ -80,8 +71,8 @@ export function QuoteForm({
   });
 
   async function onSubmit(values: QuoteFormValues) {
-    // Treat blank-string address as "no address" so we don't store
-    // empty strings on the server (the column is optional).
+    // Empty string -> undefined so we don't store blanks server-side
+    // (the column is optional).
     const customerAddress =
       values.customerAddress && values.customerAddress.length > 0
         ? values.customerAddress
@@ -113,24 +104,20 @@ export function QuoteForm({
       }
       onSuccess?.();
     } catch (err) {
-      if (err instanceof ConvexError) {
-        const data = err.data as { message?: string } | string | undefined;
-        const message =
-          typeof data === "string"
-            ? data
-            : (data?.message ??
-              (isEdit
-                ? "Could not save changes."
-                : "Could not create the quote."));
-        toast.error(isEdit ? "Could not save quote" : "Could not create quote", {
-          description: message,
-        });
-      } else {
+      if (!(err instanceof ConvexError)) {
         console.error(err);
         toast.error("Something went wrong", {
           description: "Please try again in a moment.",
         });
+        return;
       }
+
+      const data = err.data as { message?: string };
+      toast.error(isEdit ? "Could not save quote" : "Could not create quote", {
+        description:
+          data.message ??
+          (isEdit ? "Could not save changes." : "Could not create the quote."),
+      });
     }
   }
 
@@ -228,8 +215,8 @@ export function QuoteForm({
                 value={Number.isFinite(field.value) ? field.value : ""}
                 onChange={(e) => {
                   const raw = e.target.value;
-                  // Empty input -> NaN so zod's "required" message fires
-                  // instead of silently coercing to 0.
+                  // Empty -> NaN so zod's "required" fires instead of
+                  // silently coercing to 0.
                   field.onChange(raw === "" ? Number.NaN : Number(raw));
                 }}
                 onBlur={field.onBlur}

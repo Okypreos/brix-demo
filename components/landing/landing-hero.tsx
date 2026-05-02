@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { SignInButton, SignUpButton } from "@clerk/nextjs";
+import { SignInButton } from "@clerk/nextjs";
 import { ArrowRight, CalendarClock, ShieldCheck, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -13,20 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-/**
- * Marketing landing page for signed-out visitors.
- *
- * Marked `"use client"` because Clerk's `<SignInButton/>` and
- * `<SignUpButton/>` (v7) require their child to be passed via React's
- * client-side child API — server-component prop serialization trips
- * Clerk's "single child" check (it sees the button + its inner JSX
- * separately rather than as a forwarded element). Keeping the whole
- * landing component on the client matches Clerk's documented usage
- * and is what the original `app/page.tsx` did before the split.
- *
- * Authenticated users never see this — `app/page.tsx` (server
- * component) redirects them to their workspace before rendering.
- */
+
 export function LandingHero() {
   return (
     <div className="flex flex-1 flex-col bg-background">
@@ -35,47 +21,27 @@ export function LandingHero() {
           href="/"
           className="font-heading text-lg font-semibold tracking-widest uppercase"
         >
-          Brix
+          Demo
         </Link>
-        <div className="flex items-center gap-3">
-          <SignInButton mode="modal">
-            <Button variant="ghost" size="sm">
-              Sign in
-            </Button>
-          </SignInButton>
-          <SignUpButton mode="modal">
-            <Button size="sm">Get started</Button>
-          </SignUpButton>
-        </div>
+        <SignInButton mode="modal">
+          <Button variant="ghost" size="sm">
+            Sign in
+          </Button>
+        </SignInButton>
       </header>
 
       <main className="flex flex-1 flex-col items-center justify-center px-6 py-16">
         <div className="flex w-full max-w-4xl flex-col items-center gap-12 text-center">
           <div className="flex flex-col items-center gap-6">
-            <Badge variant="secondary" className="uppercase tracking-widest">
-              Field service scheduling
-            </Badge>
             <h1 className="max-w-3xl font-heading text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
               Assign quotes to technicians, without ever double-booking.
             </h1>
-            <p className="max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg">
-              Brix lets multiple managers schedule jobs onto a shared
-              technician calendar with backend-enforced conflict prevention.
-              Real-time notifications keep crews in sync.
-            </p>
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <SignUpButton mode="modal">
-                <Button size="lg">
-                  Create an account
-                  <ArrowRight className="ml-1" />
-                </Button>
-              </SignUpButton>
-              <SignInButton mode="modal">
-                <Button size="lg" variant="outline">
-                  Sign in
-                </Button>
-              </SignInButton>
-            </div>
+            <SignInButton mode="modal">
+              <Button size="lg">
+                Sign in
+                <ArrowRight className="ml-1" />
+              </Button>
+            </SignInButton>
           </div>
 
           <div className="grid w-full grid-cols-1 gap-6 sm:grid-cols-3">
@@ -99,7 +65,7 @@ export function LandingHero() {
       </main>
 
       <footer className="border-t border-border py-6 text-center text-xs text-muted-foreground">
-        Brix Scheduling · Built with Next.js, Convex, Clerk, and shadcn/ui.
+        Demo · Built with Next.js, Convex, Clerk, and shadcn/ui.
       </footer>
     </div>
   );

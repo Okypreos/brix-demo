@@ -5,14 +5,8 @@ import { usePathname } from "next/navigation";
 import { CalendarDays } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-/**
- * Technician sidebar nav.
- *
- * Currently a single entry — the schedule. Kept as a config-driven
- * array (rather than a single `<Link>`) so adding "Profile",
- * "History", or "Earnings" later is a one-line change matching the
- * pattern in `components/manager/sidebar.tsx`.
- */
+// Technician sidebar nav. Single entry today, kept as an array so
+// adding "Profile" / "History" later is a one-liner.
 const NAV: Array<{
   href: string;
   label: string;
@@ -69,7 +63,7 @@ export function TechnicianSidebar() {
         })}
       </nav>
       <div className="px-6 py-4 text-xs text-muted-foreground border-t border-border">
-        Brix Scheduling
+        Demo Scheduling
       </div>
     </aside>
   );
