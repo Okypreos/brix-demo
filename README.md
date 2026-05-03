@@ -7,7 +7,7 @@ realtime updates, and role-aware UI.
 
 ## Demo credentials
 
-All demo accounts share the same password: `**brixdemo2026`**
+All demo accounts share the same password: `brixdemo2026`
 
 
 | Role       | Email                        |
