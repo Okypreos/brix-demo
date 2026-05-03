@@ -3,7 +3,7 @@
 import { useId, useMemo } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
 import { ConvexError } from "convex/values";
 import { format } from "date-fns";
 import { CalendarIcon, Loader2 } from "lucide-react";
@@ -12,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import {
   Field,
-  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
@@ -29,9 +28,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/convex/_generated/api";
-import type { Doc, Id } from "@/convex/_generated/dataModel";
+import type { Doc } from "@/convex/_generated/dataModel";
 import {
   combineDateAndTime,
   formatJobWindow,
@@ -39,69 +37,61 @@ import {
 import {
   DURATION_OPTIONS,
   TIME_OPTIONS,
-  defaultDuration,
   formatDurationOption,
   formatTimeOption,
-  nextAvailableSlot,
+  splitEpochMsForForm,
 } from "@/lib/scheduling";
 import type { Quote } from "@/lib/types";
 import {
-  assignJobFormSchema,
-  type AssignJobFormValues,
-} from "@/lib/validators/assign-job";
+  rescheduleJobFormSchema,
+  type RescheduleJobFormValues,
+} from "@/lib/validators/reschedule-job";
 
-// Schedule a quote: pick technician + date + start + duration. Submit
-// calls `jobs.assign` (atomic + serializable OCC, no double-booking).
+// Move an existing job to a new window. Tech is fixed (you reassign by
+// deleting + re-assigning, intentionally a different flow). Submits to
+// `jobs.reschedule` which re-runs the OCC overlap guard, so two
+// managers shifting the same tech at the same instant cannot collide.
 //
-// On OVERLAP we pull conflictStart/conflictEnd from the error payload
-// and toast the exact busy window so the user knows what to dodge.
-export function AssignJobForm({
+// Same OVERLAP toast UX as assign-job-form.
+export function RescheduleJobForm({
   quote,
+  job,
   onSuccess,
   onCancel,
 }: {
   quote: Quote;
+  job: Doc<"jobs">;
   onSuccess?: () => void;
   onCancel?: () => void;
 }) {
   const formId = useId();
-  const technicians = useQuery(api.users.listTechnicians);
-  const assign = useMutation(api.jobs.assign);
+  const reschedule = useMutation(api.jobs.reschedule);
 
-  // Default to the next business-hours slot so the form lands usable.
-  // useMemo keyed on estimatedHours so user edits survive re-renders.
-  const defaults = useMemo<AssignJobFormValues>(() => {
-    const { date, startTime } = nextAvailableSlot();
-    return {
-      technicianId: "",
-      date,
-      startTime,
-      durationHours: defaultDuration(quote.estimatedHours),
-    };
-  }, [quote.estimatedHours]);
+  // Pre-fill from the current job so the manager sees where it is
+  // before nudging it. Duration recovered from end-start.
+  const defaults = useMemo<RescheduleJobFormValues>(() => {
+    const { date, startTime } = splitEpochMsForForm(job.start);
+    const durationHours = (job.end - job.start) / (60 * 60 * 1000);
+    return { date, startTime, durationHours };
+  }, [job.start, job.end]);
 
   const {
     control,
     handleSubmit,
     formState: { isSubmitting },
-  } = useForm<AssignJobFormValues>({
-    resolver: zodResolver(assignJobFormSchema),
+  } = useForm<RescheduleJobFormValues>({
+    resolver: zodResolver(rescheduleJobFormSchema),
     defaultValues: defaults,
     mode: "onSubmit",
     reValidateMode: "onChange",
   });
 
-  async function onSubmit(values: AssignJobFormValues) {
+  async function onSubmit(values: RescheduleJobFormValues) {
     try {
       const start = combineDateAndTime(values.date, values.startTime);
       const end = start + values.durationHours * 60 * 60 * 1000;
-      await assign({
-        quoteId: quote._id,
-        technicianId: values.technicianId as Id<"users">,
-        start,
-        end,
-      });
-      toast.success("Job scheduled", {
+      await reschedule({ jobId: job._id, start, end });
+      toast.success("Job rescheduled", {
         description: `${quote.title} · ${formatJobWindow(start, end)}`,
       });
       onSuccess?.();
@@ -128,7 +118,7 @@ export function AssignJobForm({
         return;
       }
 
-      toast.error("Could not schedule job", {
+      toast.error("Could not reschedule job", {
         description: data.message ?? "Pick another window.",
       });
     }
@@ -142,45 +132,6 @@ export function AssignJobForm({
       noValidate
     >
       <FieldGroup>
-        <Controller
-          name="technicianId"
-          control={control}
-          render={({ field, fieldState }) => (
-            <Field data-invalid={fieldState.invalid}>
-              <FieldLabel htmlFor={`${formId}-technician`}>
-                Technician
-              </FieldLabel>
-              {technicians === undefined ? (
-                <Skeleton className="h-10 w-full" />
-              ) : technicians.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No technicians yet. Invite a teammate by sending them
-                  the sign-up link — they&apos;ll be added automatically.
-                </p>
-              ) : (
-                <Select value={field.value} onValueChange={field.onChange}>
-                  <SelectTrigger
-                    id={`${formId}-technician`}
-                    aria-invalid={fieldState.invalid}
-                  >
-                    <SelectValue placeholder="Pick a technician" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {technicians.map((t: Doc<"users">) => (
-                      <SelectItem key={t._id} value={t._id}>
-                        {t.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              {fieldState.invalid && (
-                <FieldError errors={[fieldState.error]} />
-              )}
-            </Field>
-          )}
-        />
-
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Controller
             name="date"
@@ -208,8 +159,6 @@ export function AssignJobForm({
                       mode="single"
                       selected={field.value}
                       onSelect={(d) => d && field.onChange(d)}
-                      // Disable past days; server still re-checks.
-                      // Local midnight keeps "today" pickable.
                       disabled={(date) => {
                         const today = new Date();
                         today.setHours(0, 0, 0, 0);
@@ -233,10 +182,7 @@ export function AssignJobForm({
                 <FieldLabel htmlFor={`${formId}-startTime`}>
                   Start time
                 </FieldLabel>
-                <Select
-                  value={field.value}
-                  onValueChange={field.onChange}
-                >
+                <Select value={field.value} onValueChange={field.onChange}>
                   <SelectTrigger
                     id={`${formId}-startTime`}
                     aria-invalid={fieldState.invalid}
@@ -264,9 +210,7 @@ export function AssignJobForm({
           control={control}
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.invalid}>
-              <FieldLabel htmlFor={`${formId}-duration`}>
-                Duration
-              </FieldLabel>
+              <FieldLabel htmlFor={`${formId}-duration`}>Duration</FieldLabel>
               <Select
                 value={String(field.value)}
                 onValueChange={(v) => field.onChange(Number(v))}
@@ -285,10 +229,6 @@ export function AssignJobForm({
                   ))}
                 </SelectContent>
               </Select>
-              <FieldDescription>
-                Default seeded from this quote&apos;s estimated{" "}
-                {formatDurationOption(quote.estimatedHours)}.
-              </FieldDescription>
               {fieldState.invalid && (
                 <FieldError errors={[fieldState.error]} />
               )}
@@ -303,12 +243,9 @@ export function AssignJobForm({
             Cancel
           </Button>
         )}
-        <Button
-          type="submit"
-          disabled={isSubmitting || technicians?.length === 0}
-        >
+        <Button type="submit" disabled={isSubmitting}>
           {isSubmitting && <Loader2 className="animate-spin" />}
-          Schedule job
+          Reschedule job
         </Button>
       </div>
     </form>

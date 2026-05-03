@@ -31,7 +31,7 @@ export function TechnicianSidebar() {
           href="/schedule"
           className="block font-heading text-lg font-semibold tracking-widest uppercase"
         >
-          Brix
+          Demo
         </Link>
         <p className="mt-1 text-xs uppercase tracking-widest text-muted-foreground">
           Field

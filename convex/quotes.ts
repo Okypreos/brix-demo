@@ -121,9 +121,17 @@ export const create = mutation({
   },
 });
 
-// Partial update. Refuses completed quotes (immutable for audit).
-// Scheduled quotes are still editable since rescheduling/details are
-// common before the work happens.
+// Partial update. Refuses completed quotes (immutable for audit) and
+// quotes whose underlying job has already started (historical record).
+//
+// When the quote has a future scheduled job, the assigned technician
+// gets a `job_updated` notification atomically with the patch, so
+// they're not silently looking at a stale title/customer/address.
+//
+// Time-window changes are handled by `jobs.reschedule`, not here —
+// keeping Edit and Reschedule orthogonal makes the UI mental model
+// cleaner ("Edit changes what the job is about; Reschedule changes
+// when it happens").
 export const update = mutation({
   args: {
     id: v.id("quotes"),
@@ -148,6 +156,25 @@ export const update = mutation({
       });
     }
 
+    // If the quote is scheduled, look up its job. The schema only
+    // permits one job per quote (enforced informally — `jobs.assign`
+    // refuses to schedule an already-scheduled quote), so `unique()`
+    // is safe.
+    const job =
+      quote.status === "scheduled"
+        ? await ctx.db
+            .query("jobs")
+            .withIndex("by_quoteId", (q) => q.eq("quoteId", args.id))
+            .unique()
+        : null;
+
+    if (job && job.start <= Date.now()) {
+      throw new ConvexError({
+        code: "FORBIDDEN",
+        message: "Quotes for in-progress or past jobs cannot be edited.",
+      });
+    }
+
     const patch: Partial<Doc<"quotes">> = {};
     if (args.title !== undefined) patch.title = validateTitle(args.title);
     if (args.description !== undefined)
@@ -160,6 +187,20 @@ export const update = mutation({
       patch.estimatedHours = validateEstimatedHours(args.estimatedHours);
 
     await ctx.db.patch(args.id, patch);
+
+    // Notify the technician atomically with the edit. We only fire
+    // when there's actually a job — editing an unscheduled quote has
+    // no recipient.
+    if (job) {
+      const updatedTitle = patch.title ?? quote.title;
+      await ctx.db.insert("notifications", {
+        recipientId: job.technicianId,
+        kind: "job_updated",
+        jobId: job._id,
+        message: `Details updated: ${updatedTitle}`,
+      });
+    }
+
     return null;
   },
 });

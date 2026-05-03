@@ -1,74 +1,69 @@
 "use client";
 
 import { useState } from "react";
-import { CalendarPlus, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { CalendarClock, CalendarPlus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { AssignQuoteDialog } from "./assign-quote-dialog";
 import { EditQuoteDialog } from "./edit-quote-dialog";
 import { DeleteQuoteDialog } from "./delete-quote-dialog";
+import { RescheduleQuoteDialog } from "./reschedule-quote-dialog";
 import type { Quote } from "@/lib/types";
 
-// Card action row. Edit is hidden on completed; delete is hidden on
-// anything but unscheduled (matches server rules — keeps users from
-// hitting a confusing FORBIDDEN).
+// Card action row. One primary action per status (assign / reschedule),
+// with Edit always visible (disabled when completed) and Delete only on
+// unscheduled — matches the server rules so users can't hit a confusing
+// FORBIDDEN by clicking something they shouldn't see.
 //
-// Dialogs are siblings of the dropdown (not nested) so the dropdown
-// closing doesn't unmount the dialog mid-interaction.
+// Buttons-in-row instead of a kebab so the available actions are
+// discoverable at a glance — better for demoing the flow.
+//
+// Dialogs render alongside the buttons (not nested) so opening one
+// keeps the trigger mounted across interactions.
 export function QuoteCardActions({ quote }: { quote: Quote }) {
   const [assignOpen, setAssignOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
 
   const isUnscheduled = quote.status === "unscheduled";
+  const isScheduled = quote.status === "scheduled";
   const isCompleted = quote.status === "completed";
 
   return (
     <>
-      <div className="flex w-full items-center justify-between gap-2">
-        {isUnscheduled ? (
+      <div className="flex w-full flex-wrap items-center gap-2">
+        {isUnscheduled && (
           <Button size="sm" onClick={() => setAssignOpen(true)}>
             <CalendarPlus />
             Assign technician
           </Button>
-        ) : (
-          // Reserve button height so cards line up across statuses.
-          <div className="h-9" aria-hidden />
         )}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size="icon"
-              variant="ghost"
-              aria-label="Quote actions"
-            >
-              <MoreHorizontal />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              onSelect={() => setEditOpen(true)}
-              disabled={isCompleted}
-            >
-              <Pencil />
-              Edit
-            </DropdownMenuItem>
-            {isUnscheduled && (
-              <DropdownMenuItem
-                onSelect={() => setDeleteOpen(true)}
-                variant="destructive"
-              >
-                <Trash2 />
-                Delete
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {isScheduled && (
+          <Button size="sm" onClick={() => setRescheduleOpen(true)}>
+            <CalendarClock />
+            Reschedule
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setEditOpen(true)}
+          disabled={isCompleted}
+        >
+          <Pencil />
+          Edit
+        </Button>
+        {isUnscheduled && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setDeleteOpen(true)}
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+          >
+            <Trash2 />
+            Delete
+          </Button>
+        )}
       </div>
 
       <AssignQuoteDialog
@@ -85,6 +80,11 @@ export function QuoteCardActions({ quote }: { quote: Quote }) {
         quote={quote}
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
+      />
+      <RescheduleQuoteDialog
+        quote={quote}
+        open={rescheduleOpen}
+        onOpenChange={setRescheduleOpen}
       />
     </>
   );

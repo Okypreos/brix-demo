@@ -11,7 +11,9 @@ import { QuoteForm } from "@/components/forms/quote-form";
 import type { Quote } from "@/lib/types";
 
 // Modal wrapper around <QuoteForm> in edit mode. The form pre-fills
-// from `quote` and routes submits through `quotes.update`.
+// from `quote` and routes submits through `quotes.update`. When the
+// quote is already scheduled, the technician gets a notification on
+// save — surface that here so the manager isn't surprised.
 export function EditQuoteDialog({
   quote,
   open,
@@ -21,14 +23,15 @@ export function EditQuoteDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const isScheduled = quote.status === "scheduled";
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Edit quote</DialogTitle>
           <DialogDescription>
-            Update the customer details, estimate, or description for this
-            quote.
+            Update the customer details or description for this quote.
+            {isScheduled && " The assigned technician will be notified."}
           </DialogDescription>
         </DialogHeader>
         <QuoteForm

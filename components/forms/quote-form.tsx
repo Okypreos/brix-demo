@@ -44,6 +44,7 @@ export function QuoteForm({
   const updateQuote = useMutation(api.quotes.update);
 
   const isEdit = mode.kind === "edit";
+  const isScheduled = isEdit && mode.quote.status === "scheduled";
 
   const {
     control,
@@ -212,6 +213,7 @@ export function QuoteForm({
                 min={0.5}
                 max={24}
                 step={0.5}
+                disabled={isScheduled}
                 value={Number.isFinite(field.value) ? field.value : ""}
                 onChange={(e) => {
                   const raw = e.target.value;
@@ -224,8 +226,9 @@ export function QuoteForm({
                 aria-invalid={fieldState.invalid}
               />
               <FieldDescription>
-                Half-hour increments. The default 2-hour window can be
-                overridden during scheduling.
+                {isScheduled
+                  ? "Locked once scheduled. Use Reschedule to change the booked window."
+                  : "Half-hour increments. The default 2-hour window can be overridden during scheduling."}
               </FieldDescription>
               {fieldState.invalid && (
                 <FieldError errors={[fieldState.error]} />

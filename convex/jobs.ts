@@ -174,7 +174,7 @@ export const assign = mutation({
 });
 
 // Moves a scheduled job. Same overlap guard as `assign`, excluding the
-// job being moved. Completed jobs are immutable record.
+// job being moved. Completed, in-progress, and past jobs are immutable.
 export const reschedule = mutation({
   args: {
     jobId: v.id("jobs"),
@@ -194,6 +194,14 @@ export const reschedule = mutation({
       throw new ConvexError({
         code: "FORBIDDEN",
         message: "Completed jobs cannot be rescheduled.",
+      });
+    }
+    // Past or in-progress jobs are historical record; only future jobs
+    // can move.
+    if (job.start <= Date.now()) {
+      throw new ConvexError({
+        code: "FORBIDDEN",
+        message: "In-progress and past jobs cannot be rescheduled.",
       });
     }
 
@@ -222,7 +230,7 @@ export const reschedule = mutation({
       recipientId: job.technicianId,
       kind: "job_updated",
       jobId,
-      message: `Updated job: ${quote?.title ?? "Job"}`,
+      message: `Rescheduled: ${quote?.title ?? "Job"}`,
     });
     return null;
   },
@@ -415,6 +423,20 @@ export const listForManager = query({
       if (rangeEnd !== undefined && job.start >= rangeEnd) return false;
       return true;
     });
+  },
+});
+
+// Single job by quoteId. Manager-only — used by the reschedule
+// dialog to pre-fill from the existing job.
+export const getByQuoteId = query({
+  args: { quoteId: v.id("quotes") },
+  returns: v.union(jobValidator, v.null()),
+  handler: async (ctx, { quoteId }) => {
+    await requireManager(ctx);
+    return await ctx.db
+      .query("jobs")
+      .withIndex("by_quoteId", (q) => q.eq("quoteId", quoteId))
+      .unique();
   },
 });
 

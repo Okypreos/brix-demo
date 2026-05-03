@@ -320,7 +320,7 @@ Things I deliberately *didn't* build, with the reasoning. Showing the cut line i
 | Deferred                           | Why now                                                        | What I'd do for production                                                                               |
 | ---------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | Pagination on quotes/jobs          | Demo data fits in 100 rows; `take(100)` is honest about that   | Convex `paginate({ numItems, cursor })` on the listing queries                                           |
-| Drag-to-reschedule on the calendar | `jobs.reschedule` mutation exists; no UI surface yet           | Wire up `react-big-calendar`'s `onEventDrop` to the mutation                                             |
+| Drag-to-reschedule on the calendar | Reschedule lives on the quote card kebab; calendar is read-only for managers | Wire up `react-big-calendar`'s `onEventDrop` to the existing `jobs.reschedule` mutation                  |
 | Manager UI for promote/demote      | `users.promoteToManager` exists as an internal mutation        | Admin-only page calling it; gate via a `role: "admin"` extension                                         |
 | Soft deletes / audit trail         | Quotes are hard-deleted (only when unscheduled)                | Add `deletedAt`; route filtering through a helper instead of the schema                                  |
 | Accessibility audit                | Keyboard-navigable, dialogs trap focus, but no formal axe pass | Run axe in CI; manual screen reader pass                                                                 |
@@ -347,7 +347,7 @@ Use this section to find the relevant code in a few seconds.
 | **Conflict prevention enforced on backend**                     | `convex/jobs.ts:findOverlappingJob` + `convex/jobs.ts:assign` + `convex/lib/intervals.ts:overlaps`                     |
 | Job lifecycle: scheduled → completed                            | `convex/schema.ts` (jobs.status union); `convex/jobs.ts:complete`                                                      |
 | Technician marks job complete                                   | `components/technician/job-detail-dialog.tsx` → `convex/jobs.ts:complete` (gated by `requireTechnician`)               |
-| Notify technician on assign / update                            | `convex/jobs.ts:assign` + `convex/jobs.ts:reschedule` (atomic notification insert)                                     |
+| Notify technician on assign / update                            | Assign: `convex/jobs.ts:assign`. Reschedule (window change): `convex/jobs.ts:reschedule` via `components/quotes/reschedule-quote-dialog.tsx`. Metadata-only edit on a scheduled quote: `convex/quotes.ts:update`. All three insert the `notifications` row in the same mutation as the patch (atomic). Edit and Reschedule are kept orthogonal — Edit changes *what* a job is about, Reschedule changes *when* it happens. |
 | Notify manager on completion                                    | `convex/jobs.ts:complete`                                                                                              |
 
 
