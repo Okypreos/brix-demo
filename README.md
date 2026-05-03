@@ -3,7 +3,7 @@
 Multi-manager job scheduling with backend-enforced conflict prevention,
 realtime updates, and role-aware UI.
 
-**Live demo:** *link to be added on deploy*
+**Live demo:** https://brix-demo-five.vercel.app/
 
 ---
 
