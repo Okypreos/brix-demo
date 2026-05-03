@@ -3,7 +3,24 @@
 Multi-manager job scheduling with backend-enforced conflict prevention,
 realtime updates, and role-aware UI.
 
-**Live demo:** https://brix-demo-five.vercel.app/
+**Live demo:** [https://brix-demo-five.vercel.app/](https://brix-demo-five.vercel.app/)
+
+## Demo credentials
+
+All demo accounts share the same password: `**brixdemo2026`**
+
+
+| Role       | Email                        |
+| ---------- | ---------------------------- |
+| Manager    | `manager.alex@example.com`   |
+| Manager    | `manager.morgan@example.com` |
+| Manager    | `manager.casey@example.com`  |
+| Technician | `tech.jordan@example.com`    |
+| Technician | `tech.sam@example.com`       |
+| Technician | `tech.priya@example.com`     |
+
+
+> Throwaway demo data on a Clerk dev instance. Credentials will be rotated after review. Sign in as two different managers in two browsers to see the OCC overlap prevention live.
 
 ---
 
@@ -34,7 +51,7 @@ Next.js (App Router)
   ├─ Server Components            ── HTML on first request
   ├─ Client Components ("use client") for anything reactive
   │     │
-  │     │  WebSocket, Clerk JWT in every frame
+  │     │ 
   │     ▼
   │  Convex client (ConvexProviderWithClerk)
   │     │
@@ -317,15 +334,16 @@ A few places where the first AI suggestion was wrong or weaker than the eventual
 Things I deliberately *didn't* build, with the reasoning. Showing the cut line is more honest than pretending the project is feature-complete.
 
 
-| Deferred                           | Why now                                                        | What I'd do for production                                                                               |
-| ---------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Pagination on quotes/jobs          | Demo data fits in 100 rows; `take(100)` is honest about that   | Convex `paginate({ numItems, cursor })` on the listing queries                                           |
-| Drag-to-reschedule on the calendar | Reschedule lives on the quote card kebab; calendar is read-only for managers | Wire up `react-big-calendar`'s `onEventDrop` to the existing `jobs.reschedule` mutation                  |
-| Manager UI for promote/demote      | `users.promoteToManager` exists as an internal mutation        | Admin-only page calling it; gate via a `role: "admin"` extension                                         |
-| Soft deletes / audit trail         | Quotes are hard-deleted (only when unscheduled)                | Add `deletedAt`; route filtering through a helper instead of the schema                                  |
-| Accessibility audit                | Keyboard-navigable, dialogs trap focus, but no formal axe pass | Run axe in CI; manual screen reader pass                                                                 |
-| Tests                              | Skipped to focus engineering effort on the architecture & UX   | Convex function tests for `jobs.assign` (especially the OCC race), Playwright for the calendar drag flow |
-|                                    |                                                                |                                                                                                          |
+| Deferred                           | Why now                                                                                                                                                                                                                                                                                                | What I'd do for production                                                                               |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| Pagination on quotes/jobs          | Demo data fits in 100 rows; `take(100)` is honest about that                                                                                                                                                                                                                                           | Convex `paginate({ numItems, cursor })` on the listing queries                                           |
+| Drag-to-reschedule on the calendar | Reschedule lives on the quote card kebab; calendar is read-only for managers                                                                                                                                                                                                                           | Wire up `react-big-calendar`'s `onEventDrop` to the existing `jobs.reschedule` mutation                  |
+| Per-manager quote scoping          | Real dispatch teams work shared — if Alex is out, Morgan needs to cover his quotes. `quotes.list` returns the team-wide pool; `createdByManagerId` records the author and `jobs.managerId` records the assigner (so completion notifications go to the right person), but neither restricts visibility | Add `team_id` for multi-tenant SaaS; scope listing queries by team rather than per-manager               |
+| Manager UI for promote/demote      | `users.promoteToManager` exists as an internal mutation                                                                                                                                                                                                                                                | Admin-only page calling it; gate via a `role: "admin"` extension                                         |
+| Soft deletes / audit trail         | Quotes are hard-deleted (only when unscheduled)                                                                                                                                                                                                                                                        | Add `deletedAt`; route filtering through a helper instead of the schema                                  |
+| Accessibility audit                | Keyboard-navigable, dialogs trap focus, but no formal axe pass                                                                                                                                                                                                                                         | Run axe in CI; manual screen reader pass                                                                 |
+| Tests                              | Skipped to focus engineering effort on the architecture & UX                                                                                                                                                                                                                                           | Convex function tests for `jobs.assign` (especially the OCC race), Playwright for the calendar drag flow |
+|                                    |                                                                                                                                                                                                                                                                                                        |                                                                                                          |
 
 
 ---
@@ -337,18 +355,18 @@ Use this section to find the relevant code in a few seconds.
 ### Must Have
 
 
-| Requirement                                                     | Where                                                                                                                  |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Data model — Managers, Technicians, Quotes, Jobs, Notifications | `convex/schema.ts`                                                                                                     |
-| A Job belongs to a Technician, Quote, and Manager               | `convex/schema.ts` (jobs table FKs); enforced in `convex/jobs.ts:assign`                                               |
-| View unscheduled quotes                                         | `app/(manager)/quotes/page.tsx` → `components/quotes/quotes-page-client.tsx` ("Unscheduled" tab)                       |
-| Assign quote to technician                                      | `components/forms/assign-job-form.tsx` → `convex/jobs.ts:assign`                                                       |
-| Select a 2-hour time window                                     | `components/forms/assign-job-form.tsx` (default duration seeded from quote.estimatedHours, snapped to 0.5/1/2/4/6/8 h) |
-| **Conflict prevention enforced on backend**                     | `convex/jobs.ts:findOverlappingJob` + `convex/jobs.ts:assign` + `convex/lib/intervals.ts:overlaps`                     |
-| Job lifecycle: scheduled → completed                            | `convex/schema.ts` (jobs.status union); `convex/jobs.ts:complete`                                                      |
-| Technician marks job complete                                   | `components/technician/job-detail-dialog.tsx` → `convex/jobs.ts:complete` (gated by `requireTechnician`)               |
+| Requirement                                                     | Where                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Data model — Managers, Technicians, Quotes, Jobs, Notifications | `convex/schema.ts`                                                                                                                                                                                                                                                                                                                                                                                                         |
+| A Job belongs to a Technician, Quote, and Manager               | `convex/schema.ts` (jobs table FKs); enforced in `convex/jobs.ts:assign`                                                                                                                                                                                                                                                                                                                                                   |
+| View unscheduled quotes                                         | `app/(manager)/quotes/page.tsx` → `components/quotes/quotes-page-client.tsx` ("Unscheduled" tab)                                                                                                                                                                                                                                                                                                                           |
+| Assign quote to technician                                      | `components/forms/assign-job-form.tsx` → `convex/jobs.ts:assign`                                                                                                                                                                                                                                                                                                                                                           |
+| Select a 2-hour time window                                     | `components/forms/assign-job-form.tsx` (default duration seeded from quote.estimatedHours, snapped to 0.5/1/2/4/6/8 h)                                                                                                                                                                                                                                                                                                     |
+| **Conflict prevention enforced on backend**                     | `convex/jobs.ts:findOverlappingJob` + `convex/jobs.ts:assign` + `convex/lib/intervals.ts:overlaps`                                                                                                                                                                                                                                                                                                                         |
+| Job lifecycle: scheduled → completed                            | `convex/schema.ts` (jobs.status union); `convex/jobs.ts:complete`                                                                                                                                                                                                                                                                                                                                                          |
+| Technician marks job complete                                   | `components/technician/job-detail-dialog.tsx` → `convex/jobs.ts:complete` (gated by `requireTechnician`)                                                                                                                                                                                                                                                                                                                   |
 | Notify technician on assign / update                            | Assign: `convex/jobs.ts:assign`. Reschedule (window change): `convex/jobs.ts:reschedule` via `components/quotes/reschedule-quote-dialog.tsx`. Metadata-only edit on a scheduled quote: `convex/quotes.ts:update`. All three insert the `notifications` row in the same mutation as the patch (atomic). Edit and Reschedule are kept orthogonal — Edit changes *what* a job is about, Reschedule changes *when* it happens. |
-| Notify manager on completion                                    | `convex/jobs.ts:complete`                                                                                              |
+| Notify manager on completion                                    | `convex/jobs.ts:complete`                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 
 ### Optional Extensions
